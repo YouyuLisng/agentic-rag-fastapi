@@ -1,0 +1,39 @@
+[project]
+name = "agentic-rag-fastapi"
+version = "0.1.0"
+description = "Agentic RAG travel assistant -- hand-rolled multi-step tool-use loop over Claude, with a LangChain comparison implementation."
+readme = "README.md"
+authors = [
+    { name = "YouyuLisng", email = "a0979534311@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "anthropic>=1.5.0",
+    "fastapi>=0.141.1",
+    "psycopg[binary,pool]>=3.3.5",
+    "pydantic-settings>=2.15.0",
+    "python-dotenv>=1.2.3",
+    "uvicorn[standard]>=0.52.4",
+    "voyageai>=0.5.0",
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pyright>=1.1.414",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.7",
+]
