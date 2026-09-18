@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db import close_pool, get_pool, init_pool
+from app.routers.chat import router as chat_router
 
 
 @asynccontextmanager
@@ -24,6 +25,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+app.include_router(chat_router)
 
 
 @app.get("/health")

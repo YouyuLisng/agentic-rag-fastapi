@@ -36,4 +36,15 @@ class MaxTurnsExceededEvent(BaseModel):
     text: str
 
 
-AgentEvent = ToolCallEvent | ToolResultEvent | FinalAnswerEvent | RefusalEvent | MaxTurnsExceededEvent
+class ErrorEvent(BaseModel):
+    """Transport/infra failure (e.g. the Claude API call itself errored) --
+    distinct from RefusalEvent, which is Claude successfully responding
+    with a policy decline."""
+
+    type: Literal["error"] = "error"
+    message: str
+
+
+AgentEvent = (
+    ToolCallEvent | ToolResultEvent | FinalAnswerEvent | RefusalEvent | MaxTurnsExceededEvent | ErrorEvent
+)
