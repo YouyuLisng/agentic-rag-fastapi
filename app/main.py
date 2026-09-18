@@ -1,10 +1,15 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import cast
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from starlette.types import ExceptionHandler
 
 from app.db import close_pool, get_pool, init_pool
+from app.rate_limit import limiter
 from app.routers.chat import router as chat_router
 from app.routers.data import router as data_router
 from app.routers.documents import router as documents_router
@@ -19,6 +24,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="Agentic RAG Travel Assistant", lifespan=lifespan)
+
+app.state.limiter = limiter
+# slowapi's handler is typed against its own narrower signature, not
+# Starlette's generic ExceptionHandler -- the mismatch is a typing-only
+# issue (the runtime signature is compatible), so cast rather than wrap.
+app.add_exception_handler(RateLimitExceeded, cast(ExceptionHandler, _rate_limit_exceeded_handler))
 
 # The frontend (Next.js) runs as a separate origin during local dev;
 # tighten this to the deployed frontend's real origin before shipping.

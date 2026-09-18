@@ -1,13 +1,15 @@
 from collections.abc import AsyncIterator
 from typing import Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.agent.events import AgentEvent, ErrorEvent
 from app.agent.langchain_loop import run_agent_langchain
 from app.agent.loop import run_agent
+from app.config import get_settings
+from app.rate_limit import limiter
 
 router = APIRouter()
 
@@ -41,9 +43,10 @@ async def _event_stream(
 
 
 @router.post("/chat")
-async def chat(request: ChatRequest) -> StreamingResponse:
+@limiter.limit(get_settings().rate_limit_chat)
+async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
     return StreamingResponse(
-        _event_stream(request.message, request.impl, request.document_id),
+        _event_stream(body.message, body.impl, body.document_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

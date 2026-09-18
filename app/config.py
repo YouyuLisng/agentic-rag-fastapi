@@ -21,6 +21,14 @@ class Settings(BaseSettings):
 
     max_agent_turns: int = 6
 
+    # Rate limiting: every /chat and /documents request costs real Anthropic/
+    # Voyage API money, and both are reachable by anyone with the frontend
+    # URL -- these caps exist to bound worst-case spend from a single client,
+    # not to enforce a business quota.
+    rate_limit_chat: str = "10/minute"
+    rate_limit_documents: str = "5/minute"
+    rate_limit_eval: str = "3/minute"
+
 
 @lru_cache
 def get_settings() -> Settings:

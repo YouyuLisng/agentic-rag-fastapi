@@ -1,8 +1,10 @@
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
+from app.config import get_settings
 from app.documents.extract import SUPPORTED_EXTENSIONS
 from app.documents.service import upload_document
+from app.rate_limit import limiter
 
 router = APIRouter()
 
@@ -16,7 +18,8 @@ class UploadResponse(BaseModel):
 
 
 @router.post("/documents")
-async def upload(file: UploadFile = File(...)) -> UploadResponse:  # noqa: B008 -- FastAPI's own idiom
+@limiter.limit(get_settings().rate_limit_documents)
+async def upload(request: Request, file: UploadFile = File(...)) -> UploadResponse:  # noqa: B008 -- FastAPI's own idiom
     filename = file.filename or "unnamed"
     ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     if ext not in SUPPORTED_EXTENSIONS:
