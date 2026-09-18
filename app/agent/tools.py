@@ -5,6 +5,7 @@ from typing import Any
 from anthropic.types import ToolParam
 from pydantic import BaseModel, Field
 
+from app.documents.service import search_document as _search_document
 from app.rag.retrieval import search_knowledge
 from app.tours.queries import check_availability, get_tour_detail, search_tours
 
@@ -54,7 +55,16 @@ class CheckAvailabilityInput(BaseModel):
     )
 
 
-TOOLS: list[ToolParam] = [
+class SearchDocumentInput(BaseModel):
+    query: str = Field(
+        description="A natural-language question in Traditional Chinese about "
+        "the content of the document the user uploaded this conversation."
+    )
+
+
+# Always available -- the four tools that exist regardless of whether
+# a document was uploaded.
+BASE_TOOLS: list[ToolParam] = [
     {
         "name": "search_knowledge",
         "description": (
@@ -105,6 +115,27 @@ TOOLS: list[ToolParam] = [
     },
 ]
 
+# Only added to the tool list when the current conversation actually
+# has an uploaded document (see build_tools) -- otherwise the model
+# would see this tool and could try to call it with nothing to search.
+DOCUMENT_TOOL: ToolParam = {
+    "name": "search_document",
+    "description": (
+        "Semantic search over the document the user uploaded this "
+        "conversation (Mode B). Use this for questions about that "
+        "document's content -- not for policy questions (search_knowledge) "
+        "or tour questions (search_tours/get_tour_detail/check_availability)."
+    ),
+    "input_schema": SearchDocumentInput.model_json_schema(),
+}
+
+
+def build_tools(document_id: str | None) -> list[ToolParam]:
+    if document_id is None:
+        return BASE_TOOLS
+    return [*BASE_TOOLS, DOCUMENT_TOOL]
+
+
 _HANDLERS: dict[str, Callable[[dict[str, Any]], Awaitable[Any]]] = {}
 
 
@@ -146,13 +177,28 @@ _HANDLERS["get_tour_detail"] = _run_get_tour_detail
 _HANDLERS["check_availability"] = _run_check_availability
 
 
-async def execute_tool(name: str, raw_input: dict[str, Any]) -> tuple[str, bool]:
+async def execute_tool(name: str, raw_input: dict[str, Any], document_id: str | None = None) -> tuple[str, bool]:
     """Runs the named tool. Returns (content_json, is_error). Errors are
     caught and returned as an error payload with is_error=True rather than
     raised, so the model sees the failure (per Anthropic's tool_result
     is_error convention) and can decide how to respond -- retry with
     different input, fall back to another tool, or tell the user -- rather
-    than the whole turn blowing up."""
+    than the whole turn blowing up.
+
+    search_document is handled separately from _HANDLERS because it
+    needs document_id, which is bound server-side per conversation --
+    never something the model supplies itself, so it can't be pointed
+    at a different upload than the one it actually has access to."""
+    if name == "search_document":
+        if document_id is None:
+            return json.dumps({"error": "No document uploaded this conversation"}, ensure_ascii=False), True
+        try:
+            validated = SearchDocumentInput.model_validate(raw_input)
+            result = await _search_document(document_id, validated.query)
+        except Exception as e:
+            return json.dumps({"error": str(e)}, ensure_ascii=False), True
+        return json.dumps(result, ensure_ascii=False, default=str), False
+
     handler = _HANDLERS.get(name)
     if handler is None:
         return json.dumps({"error": f"Unknown tool: {name}"}, ensure_ascii=False), True

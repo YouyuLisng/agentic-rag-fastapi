@@ -7,8 +7,8 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
 from app.agent.events import AgentEvent, FinalAnswerEvent, ToolCallEvent, ToolResultEvent
-from app.agent.langchain_tools import LANGCHAIN_TOOLS
-from app.agent.loop import FINAL_ANSWER_PROMPT_SUFFIX, MAX_TOKENS, SYSTEM_PROMPT
+from app.agent.langchain_tools import LANGCHAIN_TOOLS, build_langchain_tools
+from app.agent.loop import FINAL_ANSWER_PROMPT_SUFFIX, MAX_TOKENS, SYSTEM_PROMPT, build_system_prompt
 from app.config import get_settings
 
 _agent: Any = None
@@ -29,21 +29,32 @@ def _build_model(model_name: str) -> BaseChatModel:
     )
 
 
-def _get_agent() -> Any:
-    """Built once and reused -- same reasoning as the Anthropic client in
-    the hand-rolled loop, this holds no per-conversation state itself
-    (LangGraph threads that through the invoke/astream call args, which
-    we don't use here since each request is a single-turn conversation).
+def _get_agent(document_id: str | None) -> Any:
+    """Cached and reused only for the no-document case -- the common
+    path, and there's nothing per-conversation about it (LangGraph
+    threads state through the invoke/astream call args, which we don't
+    use here since each request is a single-turn conversation). When a
+    document is present, a fresh agent is built with that document's
+    search tool bound in -- create_agent's compiled graph takes a fixed
+    tool list at construction, so it can't be mutated per-request the
+    way the hand-rolled loop's build_tools(document_id) can.
 
-    Bound to the fast model only -- every tool-routing decision goes
-    through it, same as the hand-rolled loop. The smart model never
-    runs inside this graph; see run_agent_langchain's escalation call."""
-    global _agent
-    if _agent is None:
-        settings = get_settings()
-        model = _build_model(settings.claude_model_fast)
-        _agent = create_agent(model, tools=LANGCHAIN_TOOLS, system_prompt=SYSTEM_PROMPT)
-    return _agent
+    Bound to the fast model either way -- every tool-routing decision
+    goes through it, same as the hand-rolled loop. The smart model
+    never runs inside this graph; see run_agent_langchain's escalation
+    call."""
+    settings = get_settings()
+    if document_id is None:
+        global _agent
+        if _agent is None:
+            model = _build_model(settings.claude_model_fast)
+            _agent = create_agent(model, tools=LANGCHAIN_TOOLS, system_prompt=SYSTEM_PROMPT)
+        return _agent
+
+    model = _build_model(settings.claude_model_fast)
+    return create_agent(
+        model, tools=build_langchain_tools(document_id), system_prompt=build_system_prompt(document_id)
+    )
 
 
 def _get_smart_model() -> BaseChatModel:
@@ -75,7 +86,9 @@ async def _escalate_final_answer(history: list[BaseMessage]) -> str:
     return _extract_text(response)
 
 
-async def run_agent_langchain(user_message: str) -> AsyncIterator[AgentEvent]:
+async def run_agent_langchain(
+    user_message: str, document_id: str | None = None
+) -> AsyncIterator[AgentEvent]:
     """Same tools, same system prompt, same underlying query functions,
     same fast/smart model routing policy as run_agent() in loop.py --
     the only thing this reimplements is the loop mechanics themselves,
@@ -90,7 +103,7 @@ async def run_agent_langchain(user_message: str) -> AsyncIterator[AgentEvent]:
     bound to one fixed model, so switching to the smart model for the
     final answer means stepping outside it for that one call."""
     settings = get_settings()
-    agent = _get_agent()
+    agent = _get_agent(document_id)
     turn = -1
     used_tool = False
     history: list[BaseMessage] = [HumanMessage(content=user_message)]

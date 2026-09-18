@@ -64,3 +64,44 @@ as $$
     order by embedding <=> query_embedding
     limit match_count;
 $$;
+
+-- Mode B: per-upload document chunks. document_id scopes retrieval to
+-- one specific upload -- never mixed with the policy knowledge base or
+-- another upload, since there's no auth/session model beyond that id.
+create table if not exists document_chunks (
+    id uuid primary key default gen_random_uuid(),
+    document_id uuid not null,
+    filename text not null,
+    chunk_index int not null,
+    content text not null,
+    embedding vector(1024),
+    created_at timestamptz not null default now()
+);
+
+create index if not exists document_chunks_embedding_idx
+    on document_chunks using hnsw (embedding vector_cosine_ops);
+
+create index if not exists document_chunks_document_id_idx
+    on document_chunks (document_id);
+
+create or replace function match_document_chunks(
+    target_document_id uuid,
+    query_embedding vector(1024),
+    match_count int default 5
+)
+returns table (
+    id uuid,
+    chunk_index int,
+    content text,
+    similarity float
+)
+language sql stable
+as $$
+    select
+        id, chunk_index, content,
+        1 - (embedding <=> query_embedding) as similarity
+    from document_chunks
+    where document_id = target_document_id
+    order by embedding <=> query_embedding
+    limit match_count;
+$$;

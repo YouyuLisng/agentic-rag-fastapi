@@ -15,17 +15,22 @@ router = APIRouter()
 class ChatRequest(BaseModel):
     message: str
     impl: Literal["handrolled", "langchain"] = "handrolled"
+    document_id: str | None = None  # Mode B -- set once /documents has been uploaded
 
 
-def _run(message: str, impl: Literal["handrolled", "langchain"]) -> AsyncIterator[AgentEvent]:
+def _run(
+    message: str, impl: Literal["handrolled", "langchain"], document_id: str | None
+) -> AsyncIterator[AgentEvent]:
     if impl == "langchain":
-        return run_agent_langchain(message)
-    return run_agent(message)
+        return run_agent_langchain(message, document_id=document_id)
+    return run_agent(message, document_id=document_id)
 
 
-async def _event_stream(message: str, impl: Literal["handrolled", "langchain"]) -> AsyncIterator[str]:
+async def _event_stream(
+    message: str, impl: Literal["handrolled", "langchain"], document_id: str | None
+) -> AsyncIterator[str]:
     try:
-        async for event in _run(message, impl):
+        async for event in _run(message, impl, document_id):
             yield f"data: {event.model_dump_json()}\n\n"
     except Exception as e:
         # A raw exception here would just silently truncate the HTTP
@@ -38,7 +43,7 @@ async def _event_stream(message: str, impl: Literal["handrolled", "langchain"]) 
 @router.post("/chat")
 async def chat(request: ChatRequest) -> StreamingResponse:
     return StreamingResponse(
-        _event_stream(request.message, request.impl),
+        _event_stream(request.message, request.impl, request.document_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

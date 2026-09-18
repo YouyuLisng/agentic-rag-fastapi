@@ -1,7 +1,9 @@
 import json
+from typing import Any
 
 from langchain_core.tools import tool
 
+from app.documents.service import search_document as _search_document
 from app.rag.retrieval import search_knowledge as _search_knowledge
 from app.tours.queries import check_availability as _check_availability
 from app.tours.queries import get_tour_detail as _get_tour_detail
@@ -106,3 +108,34 @@ async def check_availability(tour_id: str) -> str:
 
 
 LANGCHAIN_TOOLS = [search_knowledge, search_tours, get_tour_detail, check_availability]
+
+
+def make_search_document_tool(document_id: str) -> Any:
+    """document_id is bound server-side via closure, never something
+    the model itself supplies -- mirrors execute_tool's handling of
+    search_document in the hand-rolled version (app/agent/tools.py),
+    just expressed as a closure instead of an extra function param
+    since LangChain tools don't take one."""
+
+    @tool(parse_docstring=True)
+    async def search_document(query: str) -> str:
+        """Semantic search over the document the user uploaded this
+        conversation (Mode B). Use this for questions about that
+        document's content -- not for policy questions
+        (search_knowledge) or tour questions (search_tours/
+        get_tour_detail/check_availability).
+
+        Args:
+            query: A natural-language question in Traditional Chinese
+                about the content of the uploaded document.
+        """
+        result = await _search_document(document_id, query)
+        return json.dumps(result, ensure_ascii=False, default=str)
+
+    return search_document
+
+
+def build_langchain_tools(document_id: str | None) -> list[Any]:
+    if document_id is None:
+        return LANGCHAIN_TOOLS
+    return [*LANGCHAIN_TOOLS, make_search_document_tool(document_id)]

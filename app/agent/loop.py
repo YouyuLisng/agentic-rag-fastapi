@@ -12,7 +12,7 @@ from app.agent.events import (
     ToolCallEvent,
     ToolResultEvent,
 )
-from app.agent.tools import TOOLS, execute_tool
+from app.agent.tools import build_tools, execute_tool
 from app.config import get_settings
 
 SYSTEM_PROMPT = """你是一個旅行社的 AI 助理,使用繁體中文協助使用者了解旅遊政策與尋找合適的行程。
@@ -29,6 +29,18 @@ SYSTEM_PROMPT = """你是一個旅行社的 AI 助理,使用繁體中文協助�
 
 回答時可以簡短說明資訊依據(例如「根據退訂政策...」「目前符合條件的行程有...」),讓使用者知道這是有根據的答案。"""
 
+DOCUMENT_CONTEXT_SUFFIX = """
+
+使用者這次對話已經上傳了一份文件,你可以用 search_document 查詢其內容 --
+不需要再向使用者確認是否已上傳,直接查詢即可。若使用者問的是文件內容相關問題
+(例如「這份文件說什麼」「文件裡的退款規則」),優先用 search_document。"""
+
+
+def build_system_prompt(document_id: str | None) -> str:
+    if document_id is None:
+        return SYSTEM_PROMPT
+    return SYSTEM_PROMPT + DOCUMENT_CONTEXT_SUFFIX
+
 FINAL_ANSWER_PROMPT_SUFFIX = """
 
 已經查完所有需要的資料。請根據以上對話中的工具查詢結果,統整成一個完整、連貫的最終回答。"""
@@ -36,7 +48,9 @@ FINAL_ANSWER_PROMPT_SUFFIX = """
 MAX_TOKENS = 4096
 
 
-async def run_agent(user_message: str, max_turns: int | None = None) -> AsyncIterator[AgentEvent]:
+async def run_agent(
+    user_message: str, max_turns: int | None = None, document_id: str | None = None
+) -> AsyncIterator[AgentEvent]:
     """The hand-rolled agentic loop: call Claude, check stop_reason, run
     whatever tools it asked for, feed results back, repeat. Yields
     structured events as they happen so a caller (CLI logger now, SSE
@@ -57,13 +71,15 @@ async def run_agent(user_message: str, max_turns: int | None = None) -> AsyncIte
 
     messages: list[MessageParam] = [{"role": "user", "content": user_message}]
     used_tool = False
+    tools = build_tools(document_id)
+    system_prompt = build_system_prompt(document_id)
 
     for turn in range(turns):
         response = await client.messages.create(
             model=settings.claude_model_fast,
             max_tokens=MAX_TOKENS,
-            system=SYSTEM_PROMPT,
-            tools=TOOLS,
+            system=system_prompt,
+            tools=tools,
             messages=messages,
         )
 
@@ -119,7 +135,9 @@ async def run_agent(user_message: str, max_turns: int | None = None) -> AsyncIte
                 input=cast(dict[str, Any], block.input),
                 model=settings.claude_model_fast,
             )
-            result_json, is_error = await execute_tool(block.name, cast(dict[str, Any], block.input))
+            result_json, is_error = await execute_tool(
+                block.name, cast(dict[str, Any], block.input), document_id=document_id
+            )
             yield ToolResultEvent(
                 turn=turn, tool_use_id=block.id, name=block.name, result=result_json, is_error=is_error
             )
