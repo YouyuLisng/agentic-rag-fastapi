@@ -1,10 +1,12 @@
 from collections.abc import AsyncIterator
+from typing import Literal
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from app.agent.events import ErrorEvent
+from app.agent.events import AgentEvent, ErrorEvent
+from app.agent.langchain_loop import run_agent_langchain
 from app.agent.loop import run_agent
 
 router = APIRouter()
@@ -12,11 +14,18 @@ router = APIRouter()
 
 class ChatRequest(BaseModel):
     message: str
+    impl: Literal["handrolled", "langchain"] = "handrolled"
 
 
-async def _event_stream(message: str) -> AsyncIterator[str]:
+def _run(message: str, impl: Literal["handrolled", "langchain"]) -> AsyncIterator[AgentEvent]:
+    if impl == "langchain":
+        return run_agent_langchain(message)
+    return run_agent(message)
+
+
+async def _event_stream(message: str, impl: Literal["handrolled", "langchain"]) -> AsyncIterator[str]:
     try:
-        async for event in run_agent(message):
+        async for event in _run(message, impl):
             yield f"data: {event.model_dump_json()}\n\n"
     except Exception as e:
         # A raw exception here would just silently truncate the HTTP
@@ -29,7 +38,7 @@ async def _event_stream(message: str) -> AsyncIterator[str]:
 @router.post("/chat")
 async def chat(request: ChatRequest) -> StreamingResponse:
     return StreamingResponse(
-        _event_stream(request.message),
+        _event_stream(request.message, request.impl),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
