@@ -29,6 +29,10 @@ SYSTEM_PROMPT = """你是一個旅行社的 AI 助理,使用繁體中文協助�
 
 回答時可以簡短說明資訊依據(例如「根據退訂政策...」「目前符合條件的行程有...」),讓使用者知道這是有根據的答案。"""
 
+FINAL_ANSWER_PROMPT_SUFFIX = """
+
+已經查完所有需要的資料。請根據以上對話中的工具查詢結果,統整成一個完整、連貫的最終回答。"""
+
 MAX_TOKENS = 4096
 
 
@@ -36,26 +40,32 @@ async def run_agent(user_message: str, max_turns: int | None = None) -> AsyncIte
     """The hand-rolled agentic loop: call Claude, check stop_reason, run
     whatever tools it asked for, feed results back, repeat. Yields
     structured events as they happen so a caller (CLI logger now, SSE
-    endpoint later) can observe each decision, not just the final text."""
+    endpoint later) can observe each decision, not just the final text.
+
+    Model routing: every per-turn tool-selection decision uses the fast
+    model (cheap, and tool routing doesn't need deep reasoning) -- but
+    the final answer is escalated to the smart model whenever any tool
+    was actually used this conversation, since synthesizing several
+    tool results into one coherent answer is where quality matters. A
+    question that never needed a tool (a greeting, "what can you do")
+    just keeps the fast model's own answer -- no reason to pay for a
+    second call there.
+    """
     settings = get_settings()
     client = AsyncAnthropic(api_key=settings.anthropic_api_key)
     turns = max_turns if max_turns is not None else settings.max_agent_turns
 
     messages: list[MessageParam] = [{"role": "user", "content": user_message}]
+    used_tool = False
 
     for turn in range(turns):
         response = await client.messages.create(
-            model=settings.claude_model,
+            model=settings.claude_model_fast,
             max_tokens=MAX_TOKENS,
             system=SYSTEM_PROMPT,
             tools=TOOLS,
             messages=messages,
         )
-
-        if response.stop_reason == "end_turn":
-            text = "".join(block.text for block in response.content if block.type == "text")
-            yield FinalAnswerEvent(text=text)
-            return
 
         if response.stop_reason == "refusal":
             details = response.stop_details
@@ -70,7 +80,8 @@ async def run_agent(user_message: str, max_turns: int | None = None) -> AsyncIte
             # nothing coherent to return, so stop rather than feed a
             # truncated response back into the next turn.
             yield FinalAnswerEvent(
-                text="回答時超過長度限制,請試著把問題拆得更簡短明確一點。"
+                model=settings.claude_model_fast,
+                text="回答時超過長度限制,請試著把問題拆得更簡短明確一點。",
             )
             return
 
@@ -78,9 +89,16 @@ async def run_agent(user_message: str, max_turns: int | None = None) -> AsyncIte
             # pause_turn only happens with server-side tools, which this
             # agent doesn't use -- treat any other stop_reason as done
             # rather than looping forever on an unhandled case.
-            text = "".join(block.text for block in response.content if block.type == "text")
-            yield FinalAnswerEvent(text=text)
+            if not used_tool:
+                text = "".join(block.text for block in response.content if block.type == "text")
+                yield FinalAnswerEvent(model=settings.claude_model_fast, text=text)
+                return
+
+            final_text = await _escalate_final_answer(client, settings.claude_model_smart, messages)
+            yield FinalAnswerEvent(model=settings.claude_model_smart, text=final_text)
             return
+
+        used_tool = True
 
         # response.content holds response-side ContentBlock objects, not
         # the request-side ContentBlockParam types MessageParam expects --
@@ -95,7 +113,11 @@ async def run_agent(user_message: str, max_turns: int | None = None) -> AsyncIte
                 continue
 
             yield ToolCallEvent(
-                turn=turn, tool_use_id=block.id, name=block.name, input=cast(dict[str, Any], block.input)
+                turn=turn,
+                tool_use_id=block.id,
+                name=block.name,
+                input=cast(dict[str, Any], block.input),
+                model=settings.claude_model_fast,
             )
             result_json, is_error = await execute_tool(block.name, cast(dict[str, Any], block.input))
             yield ToolResultEvent(
@@ -116,3 +138,18 @@ async def run_agent(user_message: str, max_turns: int | None = None) -> AsyncIte
     yield MaxTurnsExceededEvent(
         text="這個問題需要的查詢步驟比較多,已達單次對話的查詢上限,請試著把問題拆得更明確一點。"
     )
+
+
+async def _escalate_final_answer(
+    client: AsyncAnthropic, smart_model: str, messages: list[MessageParam]
+) -> str:
+    """One extra call with no tools available -- its only job is to
+    write the final synthesis from the tool results already gathered,
+    not to decide anything further."""
+    response = await client.messages.create(
+        model=smart_model,
+        max_tokens=MAX_TOKENS,
+        system=SYSTEM_PROMPT + FINAL_ANSWER_PROMPT_SUFFIX,
+        messages=messages,
+    )
+    return "".join(block.text for block in response.content if block.type == "text")

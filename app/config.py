@@ -10,7 +10,12 @@ class Settings(BaseSettings):
     voyage_api_key: str
     database_url: str
 
-    claude_model: str = "claude-sonnet-5"
+    # Model routing: every per-turn tool-selection decision uses the fast
+    # model; the final answer is escalated to the smart model only when
+    # tools were actually used (a trivial no-tool answer stays on the
+    # fast model -- no need to pay for Sonnet to say "hello back").
+    claude_model_fast: str = "claude-haiku-4-5"
+    claude_model_smart: str = "claude-sonnet-5"
     voyage_embedding_model: str = "voyage-3"
     voyage_embedding_dimensions: int = 1024
 

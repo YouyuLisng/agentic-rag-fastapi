@@ -25,13 +25,13 @@ async def main() -> None:
         async for event in run_agent_langchain(question):
             match event.type:
                 case "tool_call":
-                    print(f"[turn {event.turn}] 呼叫工具: {event.name}({event.input})")
+                    print(f"[turn {event.turn}] ({event.model}) 呼叫工具: {event.name}({event.input})")
                 case "tool_result":
                     status = "ERROR" if event.is_error else "OK"
                     preview = event.result[:200] + ("..." if len(event.result) > 200 else "")
                     print(f"[turn {event.turn}] 工具結果 ({status}): {preview}")
                 case "final_answer":
-                    print(f"\n{'-' * 60}\n最終回答:\n{event.text}")
+                    print(f"\n{'-' * 60}\n最終回答 (by {event.model}):\n{event.text}")
                 case "refusal":
                     print(f"\n模型拒絕回答: {event.category} -- {event.explanation}")
                 case "max_turns_exceeded":

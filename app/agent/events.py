@@ -11,6 +11,7 @@ class ToolCallEvent(BaseModel):
     tool_use_id: str
     name: str
     input: dict[str, Any]
+    model: str  # which model made this routing decision (model routing)
 
 
 class ToolResultEvent(BaseModel):
@@ -25,6 +26,7 @@ class ToolResultEvent(BaseModel):
 class FinalAnswerEvent(BaseModel):
     type: Literal["final_answer"] = "final_answer"
     text: str
+    model: str  # which model wrote the final answer (model routing)
 
 
 class RefusalEvent(BaseModel):
