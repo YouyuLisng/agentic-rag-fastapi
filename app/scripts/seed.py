@@ -1,0 +1,95 @@
+"""Seeds `tours` (structured, unembedded) and `policy_chunks` (chunked +
+embedded) from data/tours.json and data/policies/*.md.
+
+Idempotent: clears each table before reinserting, so reruns don't pile
+up duplicates. Run directly: `uv run python -m app.scripts.seed`.
+"""
+
+import asyncio
+import json
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from app.db import close_pool, get_pool, init_pool  # noqa: E402
+from app.rag.chunking import chunk_markdown  # noqa: E402
+from app.rag.embeddings import embed_documents  # noqa: E402
+
+DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+
+
+async def seed_tours(conn) -> None:
+    tours = json.loads((DATA_DIR / "tours.json").read_text(encoding="utf-8"))
+
+    async with conn.cursor() as cur:
+        await cur.execute("delete from tours")
+        for tour in tours:
+            await cur.execute(
+                """
+                insert into tours
+                    (title, country, location, days, budget_twd, suitable_for, summary, itinerary)
+                values (%s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    tour["title"],
+                    tour["country"],
+                    tour["location"],
+                    tour["days"],
+                    tour["budget_twd"],
+                    tour["suitable_for"],
+                    tour["summary"],
+                    json.dumps(tour["itinerary"]),
+                ),
+            )
+    await conn.commit()
+    print(f"Seeded {len(tours)} tours.")
+
+
+async def seed_policies(conn) -> None:
+    md_files = sorted((DATA_DIR / "policies").glob("*.md"))
+
+    records: list[tuple[str, str, str, int]] = []  # slug, title, content, chunk_index
+    for path in md_files:
+        text = path.read_text(encoding="utf-8").strip()
+        lines = text.splitlines()
+        if lines and lines[0].startswith("#"):
+            title = lines[0].lstrip("#").strip()
+            body = "\n".join(lines[1:]).strip()
+        else:
+            title = path.stem
+            body = text
+
+        for i, chunk in enumerate(chunk_markdown(body)):
+            records.append((path.stem, title, chunk, i))
+
+    embeddings = await embed_documents([r[2] for r in records])
+
+    async with conn.cursor() as cur:
+        await cur.execute("delete from policy_chunks")
+        for (slug, title, content, idx), embedding in zip(records, embeddings, strict=True):
+            await cur.execute(
+                """
+                insert into policy_chunks (document_slug, title, content, chunk_index, embedding)
+                values (%s, %s, %s, %s, %s)
+                """,
+                (slug, title, content, idx, embedding),
+            )
+    await conn.commit()
+    print(f"Seeded {len(records)} policy chunks from {len(md_files)} documents.")
+
+
+async def main() -> None:
+    await init_pool()
+    pool = get_pool()
+    try:
+        async with pool.connection() as conn:
+            await seed_tours(conn)
+            await seed_policies(conn)
+    finally:
+        await close_pool()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
