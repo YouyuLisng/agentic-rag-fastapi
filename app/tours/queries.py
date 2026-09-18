@@ -65,3 +65,30 @@ async def get_tour_detail(tour_id: str) -> dict[str, Any] | None:
         columns = [desc[0] for desc in cur.description]
 
     return dict(zip(columns, row, strict=True))
+
+
+async def check_availability(tour_id: str) -> dict[str, Any] | None:
+    """Real-time fact lookup, not a search or a description -- distinct
+    from search_tours (filtering) and get_tour_detail (static content):
+    this answers "is there still room on this specific tour" the way a
+    real booking system would, off enrolled_count/capacity."""
+    pool = get_pool()
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "select id, title, capacity, enrolled_count from tours where id = %s::uuid",
+            (tour_id,),
+        )
+        row = await cur.fetchone()
+        if row is None:
+            return None
+        tour_id_val, title, capacity, enrolled_count = row
+
+    remaining = capacity - enrolled_count
+    return {
+        "id": tour_id_val,
+        "title": title,
+        "capacity": capacity,
+        "enrolled_count": enrolled_count,
+        "remaining": remaining,
+        "is_available": remaining > 0,
+    }

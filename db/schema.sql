@@ -15,9 +15,19 @@ create table if not exists tours (
     budget_twd int not null,
     suitable_for text[] not null default '{}',
     summary text not null,
-    itinerary jsonb not null default '[]',  -- [{day, title, description}, ...]
+    -- [{day, title, description, breakfast, lunch, dinner, hotel}, ...]
+    itinerary jsonb not null default '[]',
+    capacity int not null default 20,
+    enrolled_count int not null default 0,
     created_at timestamptz not null default now()
 );
+
+-- `create table if not exists` above is a no-op against an already-
+-- existing tours table (this schema shipped once already, before
+-- these columns existed) -- these keep schema.sql safely re-runnable
+-- against a live DB instead of requiring a drop/recreate.
+alter table tours add column if not exists capacity int not null default 20;
+alter table tours add column if not exists enrolled_count int not null default 0;
 
 -- Policy knowledge base. Embedded, queried by search_knowledge via
 -- cosine similarity.

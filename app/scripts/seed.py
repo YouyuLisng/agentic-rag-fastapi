@@ -29,8 +29,9 @@ async def seed_tours(conn) -> None:
             await cur.execute(
                 """
                 insert into tours
-                    (title, country, location, days, budget_twd, suitable_for, summary, itinerary)
-                values (%s, %s, %s, %s, %s, %s, %s, %s)
+                    (title, country, location, days, budget_twd, suitable_for, summary,
+                     itinerary, capacity, enrolled_count)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     tour["title"],
@@ -41,6 +42,8 @@ async def seed_tours(conn) -> None:
                     tour["suitable_for"],
                     tour["summary"],
                     json.dumps(tour["itinerary"]),
+                    tour["capacity"],
+                    tour["enrolled_count"],
                 ),
             )
     await conn.commit()

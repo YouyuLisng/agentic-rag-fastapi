@@ -3,6 +3,7 @@ import json
 from langchain_core.tools import tool
 
 from app.rag.retrieval import search_knowledge as _search_knowledge
+from app.tours.queries import check_availability as _check_availability
 from app.tours.queries import get_tour_detail as _get_tour_detail
 from app.tours.queries import search_tours as _search_tours
 
@@ -87,4 +88,21 @@ async def get_tour_detail(tour_id: str) -> str:
     return json.dumps(result, ensure_ascii=False, default=str)
 
 
-LANGCHAIN_TOOLS = [search_knowledge, search_tours, get_tour_detail]
+@tool(parse_docstring=True)
+async def check_availability(tour_id: str) -> str:
+    """Real-time check of whether a specific tour still has open spots
+    (capacity minus current enrollment) -- e.g. '這團還有位子嗎'. This is
+    a live fact lookup, not a description -- use get_tour_detail
+    instead for itinerary/content questions about a tour.
+
+    Args:
+        tour_id: A tour's id (UUID), exactly as returned by a prior
+            search_tours call -- never guess or invent one.
+    """
+    result = await _check_availability(tour_id)
+    if result is None:
+        return json.dumps({"error": f"No tour found with id {tour_id}"}, ensure_ascii=False)
+    return json.dumps(result, ensure_ascii=False, default=str)
+
+
+LANGCHAIN_TOOLS = [search_knowledge, search_tours, get_tour_detail, check_availability]

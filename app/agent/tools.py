@@ -6,7 +6,7 @@ from anthropic.types import ToolParam
 from pydantic import BaseModel, Field
 
 from app.rag.retrieval import search_knowledge
-from app.tours.queries import get_tour_detail, search_tours
+from app.tours.queries import check_availability, get_tour_detail, search_tours
 
 
 class SearchKnowledgeInput(BaseModel):
@@ -41,6 +41,13 @@ class SearchToursInput(BaseModel):
 
 
 class GetTourDetailInput(BaseModel):
+    tour_id: str = Field(
+        description="A tour's id (UUID), exactly as returned by a prior "
+        "search_tours call -- never guess or invent one."
+    )
+
+
+class CheckAvailabilityInput(BaseModel):
     tour_id: str = Field(
         description="A tour's id (UUID), exactly as returned by a prior "
         "search_tours call -- never guess or invent one."
@@ -85,6 +92,17 @@ TOOLS: list[ToolParam] = [
         ),
         "input_schema": GetTourDetailInput.model_json_schema(),
     },
+    {
+        "name": "check_availability",
+        "description": (
+            "Real-time check of whether a specific tour still has open "
+            "spots (capacity minus current enrollment) -- e.g. '這團還有位子嗎'. "
+            "This is a live fact lookup, not a description -- use "
+            "get_tour_detail instead for itinerary/content questions about "
+            "a tour. Requires a tour id from a prior search_tours call."
+        ),
+        "input_schema": CheckAvailabilityInput.model_json_schema(),
+    },
 ]
 
 _HANDLERS: dict[str, Callable[[dict[str, Any]], Awaitable[Any]]] = {}
@@ -114,9 +132,18 @@ async def _run_get_tour_detail(raw_input: dict[str, Any]) -> Any:
     return result
 
 
+async def _run_check_availability(raw_input: dict[str, Any]) -> Any:
+    validated = CheckAvailabilityInput.model_validate(raw_input)
+    result = await check_availability(validated.tour_id)
+    if result is None:
+        return {"error": f"No tour found with id {validated.tour_id}"}
+    return result
+
+
 _HANDLERS["search_knowledge"] = _run_search_knowledge
 _HANDLERS["search_tours"] = _run_search_tours
 _HANDLERS["get_tour_detail"] = _run_get_tour_detail
+_HANDLERS["check_availability"] = _run_check_availability
 
 
 async def execute_tool(name: str, raw_input: dict[str, Any]) -> tuple[str, bool]:
