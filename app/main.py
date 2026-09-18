@@ -8,6 +8,7 @@ from app.db import close_pool, get_pool, init_pool
 from app.routers.chat import router as chat_router
 from app.routers.data import router as data_router
 from app.routers.documents import router as documents_router
+from app.routers.eval import router as eval_router
 
 
 @asynccontextmanager
@@ -32,6 +33,7 @@ app.add_middleware(
 app.include_router(chat_router)
 app.include_router(documents_router)
 app.include_router(data_router)
+app.include_router(eval_router)
 
 
 @app.get("/health")
