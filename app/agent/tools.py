@@ -6,6 +6,7 @@ from anthropic.types import ToolParam
 from pydantic import BaseModel, Field
 
 from app.rag.retrieval import search_knowledge
+from app.tours.queries import get_tour_detail, search_tours
 
 
 class SearchKnowledgeInput(BaseModel):
@@ -19,8 +20,33 @@ class SearchKnowledgeInput(BaseModel):
     )
 
 
-# Stage 3 adds search_tours / get_tour_detail here -- the loop and
-# executor below are written to scale to more tools without changes.
+class SearchToursInput(BaseModel):
+    country: str | None = Field(
+        default=None,
+        description="Filter by destination country. Must be exactly one of: "
+        "日本, 泰國, 紐西蘭, 韓國, 印尼, 台灣. Omit to search every country.",
+    )
+    max_budget_twd: int | None = Field(
+        default=None, description="Maximum budget in TWD. Omit for no budget ceiling."
+    )
+    min_days: int | None = Field(default=None, description="Minimum trip length in days.")
+    max_days: int | None = Field(default=None, description="Maximum trip length in days.")
+    suitable_for: str | None = Field(
+        default=None,
+        description="Filter by traveler type. Must be exactly one of: "
+        "一般大眾, 賞楓愛好者, 親子家庭, 長輩, 銀髮族, 學生, 小資族, 自然愛好者, "
+        "健行族, 年輕族群, 情侶, 蜜月, 樂齡族. Pick the closest matching tag rather "
+        "than inventing a new one -- an unrecognized tag will just return zero results.",
+    )
+
+
+class GetTourDetailInput(BaseModel):
+    tour_id: str = Field(
+        description="A tour's id (UUID), exactly as returned by a prior "
+        "search_tours call -- never guess or invent one."
+    )
+
+
 TOOLS: list[ToolParam] = [
     {
         "name": "search_knowledge",
@@ -35,6 +61,30 @@ TOOLS: list[ToolParam] = [
         ),
         "input_schema": SearchKnowledgeInput.model_json_schema(),
     },
+    {
+        "name": "search_tours",
+        "description": (
+            "Structured filter search over the tour catalog by country, "
+            "budget, trip length, and/or traveler type. Returns a list of "
+            "matching tours (id, title, country, location, days, budget, "
+            "suitable_for, summary) -- NOT the full day-by-day itinerary, "
+            "use get_tour_detail with a returned id for that. All filters "
+            "are optional and combine with AND; omit filters the user didn't "
+            "specify rather than guessing a value. Use this for 'find a "
+            "tour matching X' questions, not for policy/rule questions."
+        ),
+        "input_schema": SearchToursInput.model_json_schema(),
+    },
+    {
+        "name": "get_tour_detail",
+        "description": (
+            "Full detail for one specific tour, including its day-by-day "
+            "itinerary. Requires a tour id obtained from a prior "
+            "search_tours call in this conversation -- call search_tours "
+            "first if you don't already have one."
+        ),
+        "input_schema": GetTourDetailInput.model_json_schema(),
+    },
 ]
 
 _HANDLERS: dict[str, Callable[[dict[str, Any]], Awaitable[Any]]] = {}
@@ -45,7 +95,28 @@ async def _run_search_knowledge(raw_input: dict[str, Any]) -> Any:
     return await search_knowledge(validated.query)
 
 
+async def _run_search_tours(raw_input: dict[str, Any]) -> Any:
+    validated = SearchToursInput.model_validate(raw_input)
+    return await search_tours(
+        country=validated.country,
+        max_budget_twd=validated.max_budget_twd,
+        min_days=validated.min_days,
+        max_days=validated.max_days,
+        suitable_for=validated.suitable_for,
+    )
+
+
+async def _run_get_tour_detail(raw_input: dict[str, Any]) -> Any:
+    validated = GetTourDetailInput.model_validate(raw_input)
+    result = await get_tour_detail(validated.tour_id)
+    if result is None:
+        return {"error": f"No tour found with id {validated.tour_id}"}
+    return result
+
+
 _HANDLERS["search_knowledge"] = _run_search_knowledge
+_HANDLERS["search_tours"] = _run_search_tours
+_HANDLERS["get_tour_detail"] = _run_get_tour_detail
 
 
 async def execute_tool(name: str, raw_input: dict[str, Any]) -> tuple[str, bool]:
