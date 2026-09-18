@@ -5,16 +5,15 @@ from psycopg import sql
 from app.db import get_pool
 
 
-async def search_tours(
+def _build_search_tours_query(
     country: str | None = None,
     max_budget_twd: int | None = None,
     min_days: int | None = None,
     max_days: int | None = None,
     suitable_for: str | None = None,
-) -> list[dict[str, Any]]:
-    """Structured filter over the tour catalog -- exact/range matching,
-    no embeddings involved. This is the "agentic tool call" half of the
-    routing story, contrasting with search_knowledge's semantic RAG."""
+) -> tuple[sql.Composed, list[Any]]:
+    """Pure query-building, split out from search_tours so the
+    filter-combination logic is unit-testable without a live DB."""
     conditions: list[sql.Composable] = []
     params: list[Any] = []
 
@@ -39,6 +38,26 @@ async def search_tours(
         "select id, title, country, location, days, budget_twd, suitable_for, summary "
         "from tours where {where} order by budget_twd asc"
     ).format(where=where_clause)
+    return query, params
+
+
+async def search_tours(
+    country: str | None = None,
+    max_budget_twd: int | None = None,
+    min_days: int | None = None,
+    max_days: int | None = None,
+    suitable_for: str | None = None,
+) -> list[dict[str, Any]]:
+    """Structured filter over the tour catalog -- exact/range matching,
+    no embeddings involved. This is the "agentic tool call" half of the
+    routing story, contrasting with search_knowledge's semantic RAG."""
+    query, params = _build_search_tours_query(
+        country=country,
+        max_budget_twd=max_budget_twd,
+        min_days=min_days,
+        max_days=max_days,
+        suitable_for=suitable_for,
+    )
 
     pool = get_pool()
     async with pool.connection() as conn, conn.cursor() as cur:
