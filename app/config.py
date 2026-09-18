@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     voyage_api_key: str
     database_url: str
 
-    claude_model: str = "claude-sonnet-4-5"
+    claude_model: str = "claude-sonnet-5"
     voyage_embedding_model: str = "voyage-3"
     voyage_embedding_dimensions: int = 1024
 
