@@ -93,9 +93,13 @@ async def run_agent(user_message: str, max_turns: int | None = None) -> AsyncIte
             if block.type != "tool_use":
                 continue
 
-            yield ToolCallEvent(turn=turn, name=block.name, input=cast(dict[str, Any], block.input))
+            yield ToolCallEvent(
+                turn=turn, tool_use_id=block.id, name=block.name, input=cast(dict[str, Any], block.input)
+            )
             result_json, is_error = await execute_tool(block.name, cast(dict[str, Any], block.input))
-            yield ToolResultEvent(turn=turn, name=block.name, result=result_json, is_error=is_error)
+            yield ToolResultEvent(
+                turn=turn, tool_use_id=block.id, name=block.name, result=result_json, is_error=is_error
+            )
 
             tool_result_blocks.append(
                 ToolResultBlockParam(

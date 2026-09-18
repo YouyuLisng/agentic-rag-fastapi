@@ -8,6 +8,7 @@ class ToolCallEvent(BaseModel):
 
     type: Literal["tool_call"] = "tool_call"
     turn: int
+    tool_use_id: str
     name: str
     input: dict[str, Any]
 
@@ -15,6 +16,7 @@ class ToolCallEvent(BaseModel):
 class ToolResultEvent(BaseModel):
     type: Literal["tool_result"] = "tool_result"
     turn: int
+    tool_use_id: str
     name: str
     result: str  # JSON string
     is_error: bool
