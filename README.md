@@ -54,19 +54,28 @@ flowchart TD
     G1 --> G2[回傳完整行程含每日細節]
     G2 --> Merge
 
+    D -->|問還有沒有位子/最新報價| H[呼叫 check_availability]
+    H --> H1["即時 SQL 查詢 tours 表<br/>capacity - enrolled_count"]
+    H1 --> H2[回傳剩餘名額 + 目前報價]
+    H2 --> Merge
+
     Merge --> B
     B --> C2{這輪 stop_reason}
     C2 -->|還要再查| D
     C2 -->|end_turn| ZFinal2[輸出最終答案]
 ```
 
-The tour-search path (`search_tours`/`get_tour_detail`) queries a real
-table with real SQL -- it just happens to be seeded from 8 hand-written
-rows (`data/tours.json`) rather than a production inventory system.
-Swapping in a real product database wouldn't change this diagram at
-all, only what's behind `tours`: the model still has to understand the
-question, decide to call the tool, and extract filter conditions
-either way.
+Every tour-path tool (`search_tours`/`get_tour_detail`/`check_availability`)
+queries a real Postgres table with real SQL, live, per request -- there
+is no cached/precomputed answer anywhere in this path. `check_availability`
+specifically exists to demonstrate that this isn't a static FAQ bot:
+"這團還有位子嗎" always re-reads `capacity - enrolled_count` from the
+database at the moment it's asked, not a number baked into the prompt
+or a snapshot from ingestion time. The table happens to be seeded from
+8 hand-written rows (`data/tours.json`) rather than a production
+inventory system, but that's a data-volume difference, not an
+architectural one -- swapping in a real product database wouldn't
+change this diagram at all, only what's behind `tours`.
 
 ## Setup
 
