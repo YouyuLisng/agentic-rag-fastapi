@@ -164,3 +164,88 @@ uv run pytest
 uv run ruff check .
 uv run pyright
 ```
+
+## Evaluation (three layers, not just "it seemed to work")
+
+Unit tests (above) verify pure logic with everything mocked -- they
+can't tell you whether the *model* is actually good at this job. That
+needs live evaluation against the real Claude/Voyage APIs, split into
+three layers that each catch a different failure mode:
+
+| Layer | Endpoint / script | What it catches | Live result |
+|---|---|---|---|
+| **Retrieval** | `GET /eval/retrieval`, `app/scripts/run_eval.py` | Wrong document ranked first even though the right one exists | Accuracy@1 93.8%, @3/@5 100%, MRR 0.969 (16 cases) |
+| **Generation** | `GET /eval/generation`, `app/scripts/run_generation_eval.py` | Hallucination (Faithfulness) and answering the wrong question (Answer Relevancy) -- Ragas-style LLM-as-a-Judge, Haiku as judge | Faithfulness 1.00, Answer Relevancy 0.47-0.78 (8 cases) |
+| **Tool selection** | `GET /eval/tool-selection`, dataset in `app/eval/tool_selection_dataset.py` | Routing mistakes: wrong tool, missing tool, or an unnecessary tool call the first two layers can't see | Exact-match 19/19, precision/recall 1.0 (19 cases) |
+
+Plus two live regression suites that target specific failure modes by name rather than a general score:
+
+- `app/scripts/multi_turn_flow_test.py` -- does context survive across
+  separate turns (tour_id resolution, filter pivots after an empty
+  result, RBAC holding on a follow-up)
+- `app/scripts/hallucination_regression_test.py` -- given a query with
+  no real answer (a nonexistent tour, a fictional insurance product),
+  does the agent say so honestly instead of fabricating one
+
+Retrieval eval auto-runs on the `/eval` page load (cheap: pure
+embedding calls). Generation, tool-selection, and both regression
+suites all cost a full agent turn (or several) per case, so they're
+manually triggered, not run on every page load or every commit.
+
+### Debugging stories (found by testing, not by inspection)
+
+**The tour_id hallucination bug.** Building `multi_turn_flow_test.py`
+surfaced a 100%-reproducible bug: on a follow-up turn ("這團還有位子
+嗎?"), the LangChain implementation invented a fake tour_id
+(`"bali-honeymoon-5d"`) instead of re-querying `search_tours`, because
+conversation history only replays prior turns' text, not tool state --
+neither implementation actually has the real id on a later turn unless
+it re-queries for it. The hand-rolled loop already did this correctly;
+a `SYSTEM_PROMPT` clause fixed the LangChain side (`app/agent/loop.py`),
+verified by rerunning the exact scenario: 3/3 failing before, 3/3
+passing after.
+
+**A test that failed for the wrong reason, twice.** The first version
+of the "empty result, then pivot" scenario asked "有沒有非洲的行程"
+and failed on *both* implementations -- for two different, both-
+legitimate reasons. Hand-rolled filtered by `country="非洲"` (an
+invalid enum value) and correctly got zero rows. LangChain instead
+fetched all 8 tours unfiltered and reasoned "none of these are Africa"
+from the full list -- a non-empty tool result, but still an honest
+final answer. Neither was a bug; the test's assertion (search_tours
+must return `[]`) was too strict about *how* the agent reaches an
+honest answer. Replaced with a budget-ceiling case where no filtering
+strategy can produce a false match.
+
+**A hallucination test that also failed for the wrong reason.** The
+original nonexistent-tour scenario asked about a tour by an obviously
+fictional name ("火星探索七日遊") and reliably "failed" -- but
+`search_tours` has no name/keyword parameter (only country/budget/
+days/suitable_for), so the agent correctly explained it couldn't
+search by name instead of guessing. Honest behavior given a real tool
+design limitation, not hallucination. Replaced with a query on a real,
+searchable filter combination guaranteed to return zero rows.
+
+**A genuinely nuanced hallucination finding, kept rather than hidden.**
+Asking about a fictional insurance product across repeated runs: once,
+the model correctly said lost/delayed baggage is the airline's
+responsibility per the retrieved policy text; another time, it stated
+insurance "covers" baggage loss/delay -- misattributing one real
+policy's content to another real, related policy, not inventing
+anything. Separately, the Faithfulness judge's own claim decomposition
+doesn't distinguish factual claims from reasonable meta-commentary
+("sci-fi scenarios aren't typically covered"), so it flags both as
+"unsupported" -- a real limitation of naive claim-decomposition
+scoring, not of the agent. The regression test's pass criterion checks
+the one thing that actually matters (never claim to offer a fictional
+product) and reports Faithfulness as diagnostic detail, not a hard
+gate on secondary claims -- see the docstring in
+`app/scripts/hallucination_regression_test.py` for the full writeup.
+
+## Open-source model comparison (Ollama)
+
+`app/scripts/model_comparison.py` reruns the same live eval framework
+above against local Ollama models instead of Claude, to compare
+Traditional Chinese answer quality and inference speed against
+open-weight alternatives on consumer hardware. See that script for the
+current models and results.
