@@ -29,6 +29,13 @@ create table if not exists tours (
 alter table tours add column if not exists capacity int not null default 20;
 alter table tours add column if not exists enrolled_count int not null default 0;
 
+-- Internal floor/cost price -- deliberately never selected by any
+-- tour-path query (search_tours/get_tour_detail/check_availability) or
+-- exposed by any router/response model. Isolation is enforced by never
+-- letting this column reach a SELECT the agent's tools can see, not by
+-- asking the model nicely not to repeat it -- see app/agent/loop.py.
+alter table tours add column if not exists cost_price_twd int not null default 0;
+
 -- Policy knowledge base. Embedded, queried by search_knowledge via
 -- cosine similarity.
 create table if not exists policy_chunks (

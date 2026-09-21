@@ -77,6 +77,29 @@ inventory system, but that's a data-volume difference, not an
 architectural one -- swapping in a real product database wouldn't
 change this diagram at all, only what's behind `tours`.
 
+### Data isolation (internal cost price never reaches the model)
+
+`tours.cost_price_twd` (internal floor/cost price, as opposed to
+`budget_twd`, the customer-facing sell price) is deliberately never
+selected by `search_tours`/`get_tour_detail`/`check_availability`, and
+never appears in any router's response model. This is enforced at the
+data layer, not the prompt layer: the column simply isn't in any SELECT
+the agent's tools can run, so there's no channel for the model to leak
+it through regardless of how a user phrases the question -- a system
+prompt clause telling the model not to disclose cost data (in
+`app/agent/loop.py`'s `SYSTEM_PROMPT`) is a second line of defense, not
+the primary one, since prompts alone can be argued or injected around.
+
+Verified live, not just by code review: `app/scripts/security_probe.py`
+sends both implementations a handful of adversarial prompts (direct
+asks, "estimate from the sell price" framing, and a prompt-injection
+attempt telling the model to ignore its instructions and act as an
+internal finance system) and greps every answer for the actual known
+`cost_price_twd` values from the seed data -- an exact-number match, not
+a keyword heuristic. Run it yourself: `uv run python -m
+app.scripts.security_probe` (costs real API calls, one full agent turn
+per prompt per implementation).
+
 ## Setup
 
 ```bash
