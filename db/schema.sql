@@ -48,12 +48,27 @@ create table if not exists policy_chunks (
     created_at timestamptz not null default now()
 );
 
+-- Topic tags, e.g. {'不可抗力','退款'} -- lets a caller that already
+-- knows the topic bucket (from upstream context, not inferred here)
+-- pre-filter the search space before ranking, rather than relying on
+-- embedding similarity alone. See match_policy_chunks' filter_tags and
+-- app/scripts/metadata_filter_demo.py for why this matters: the eval
+-- set's one real miss ("因為疫情取消行程,費用會退嗎?", expected
+-- force-majeure) ranks cancellation first on pure vector search because
+-- both documents discuss refunds -- filtering to tags=['不可抗力'] fixes
+-- it without touching the embeddings at all.
+alter table policy_chunks add column if not exists tags text[] not null default '{}';
+
 create index if not exists policy_chunks_embedding_idx
     on policy_chunks using hnsw (embedding vector_cosine_ops);
 
+create index if not exists policy_chunks_tags_idx
+    on policy_chunks using gin (tags);
+
 create or replace function match_policy_chunks(
     query_embedding vector(1024),
-    match_count int default 5
+    match_count int default 5,
+    filter_tags text[] default null
 )
 returns table (
     id uuid,
@@ -68,6 +83,7 @@ as $$
         id, document_slug, title, content,
         1 - (embedding <=> query_embedding) as similarity
     from policy_chunks
+    where filter_tags is null or tags && filter_tags
     order by embedding <=> query_embedding
     limit match_count;
 $$;

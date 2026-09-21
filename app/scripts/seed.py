@@ -51,6 +51,22 @@ async def seed_tours(conn) -> None:
     print(f"Seeded {len(tours)} tours.")
 
 
+# Curated per-document topic tags -- deliberately allowed to overlap
+# (force-majeure is tagged 退款 too, since it genuinely discusses refund
+# handling) rather than being a 1:1 relabeling of document_slug. See
+# db/schema.sql's comment on policy_chunks.tags for why this exists.
+POLICY_TAGS: dict[str, list[str]] = {
+    "cancellation": ["退訂", "退款"],
+    "force-majeure": ["不可抗力", "退款", "天災", "疫情"],
+    "insurance": ["保險", "理賠"],
+    "payment": ["付款", "訂金"],
+    "preparation": ["行前準備", "證件"],
+    "special-needs": ["特殊需求", "無障礙"],
+    "visa": ["簽證", "證件"],
+    "packing": ["打包", "穿著"],
+}
+
+
 async def seed_policies(conn) -> None:
     md_files = sorted((DATA_DIR / "policies").glob("*.md"))
 
@@ -75,10 +91,10 @@ async def seed_policies(conn) -> None:
         for (slug, title, content, idx), embedding in zip(records, embeddings, strict=True):
             await cur.execute(
                 """
-                insert into policy_chunks (document_slug, title, content, chunk_index, embedding)
-                values (%s, %s, %s, %s, %s)
+                insert into policy_chunks (document_slug, title, content, chunk_index, embedding, tags)
+                values (%s, %s, %s, %s, %s, %s)
                 """,
-                (slug, title, content, idx, embedding),
+                (slug, title, content, idx, embedding, POLICY_TAGS.get(slug, [])),
             )
     await conn.commit()
     print(f"Seeded {len(records)} policy chunks from {len(md_files)} documents.")
