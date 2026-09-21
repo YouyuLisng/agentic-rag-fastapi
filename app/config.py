@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     rate_limit_chat: str = "10/minute"
     rate_limit_documents: str = "5/minute"
     rate_limit_eval: str = "3/minute"
+    # Generation eval runs a full agent turn plus two judge calls per
+    # case (~8 cases) -- far more expensive per hit than retrieval eval,
+    # so it gets a tighter cap.
+    rate_limit_eval_generation: str = "2/minute"
 
 
 @lru_cache
