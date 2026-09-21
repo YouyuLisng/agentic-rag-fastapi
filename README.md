@@ -244,8 +244,37 @@ gate on secondary claims -- see the docstring in
 
 ## Open-source model comparison (Ollama)
 
-`app/scripts/model_comparison.py` reruns the same live eval framework
-above against local Ollama models instead of Claude, to compare
-Traditional Chinese answer quality and inference speed against
-open-weight alternatives on consumer hardware. See that script for the
-current models and results.
+`app/scripts/model_comparison.py` isolates the generation step: given
+*identical* retrieved context (the real `search_knowledge`, unchanged)
+and the same 8 questions from the generation eval set, each candidate
+model generates a Traditional Chinese answer, scored by the same fixed
+judge (Claude Haiku) for a fair comparison. Deliberately doesn't test
+agentic tool-calling through Ollama -- open-model function-calling
+reliability is a different, larger evaluation than the one this
+targets (繁中回答品質、推論速度、RAG 效果).
+
+Run live on an 8GB M1 (this machine) -- small models chosen to fit
+without swapping:
+
+| Model | Avg latency | Avg Faithfulness | Avg Answer Relevancy | Simplified-character slips |
+|---|---|---|---|---|
+| claude-haiku (baseline) | 3.8s | 1.000 | 0.639 | 0/8 |
+| qwen2.5:3b | 11.8s | 0.912 | 0.635 | 0/8 |
+| qwen2.5:1.5b | 7.2s | 0.885 | 0.639 | **3/8** |
+| llama3.2:3b | 12.1s | 0.802 | 0.612 | 1/8 |
+
+The "simplified-character slips" column exists because the other three
+metrics completely miss it: a fluent Simplified Chinese answer scores
+fine on Faithfulness and Answer Relevancy, but fails the actual
+`繁體中文` requirement outright. Manual spot-checking first, before
+building this metric, surfaced qwen2.5:1.5b ignoring an explicit
+`請用繁體中文回答` instruction in its prompt and answering in Simplified
+anyway -- the live run confirms it's not a one-off: 3 of 8 cases, vs.
+0 for the same family's 3B variant. Claude Haiku is both faster (no
+local CPU inference) and more faithful, unsurprising given the size
+difference, but the Traditional-vs-Simplified gap is the more
+actionable finding for a target-language-specific deployment decision:
+qwen2.5:3b is the more usable open-weight option here, not because its
+Faithfulness score is highest among the open models (it's close to
+qwen2.5:1.5b's), but because it never silently answers in the wrong
+script.
