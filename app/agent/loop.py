@@ -12,6 +12,7 @@ from app.agent.events import (
     ToolCallEvent,
     ToolResultEvent,
 )
+from app.agent.history import HistoryMessage
 from app.agent.tools import build_tools, execute_tool
 from app.config import get_settings
 
@@ -26,6 +27,11 @@ SYSTEM_PROMPT = """你是一個旅行社的 AI 助理,使用繁體中文協助�
 複合問題可以拆成多次工具呼叫,依序或同時查詢都可以,查完再統整成一個回答。
 不要憑空編造政策內容或行程細節 -- 如果查詢結果不足以回答問題(例如查無符合條件的行程),
 誠實告知使用者,不要臆測或硬湊一個答案。
+
+對話歷史裡之前提過的行程,只有名稱、沒有附上實際的 id -- 如果使用者用「這團」「剛剛那個」
+這類指代詞問後續問題(例如接著問名額、細節),你必須先重新呼叫 search_tours 依名稱取得真實
+id,絕對不能自己編造或憑印象猜一個 id 格式(例如英文 slug)去呼叫 get_tour_detail /
+check_availability -- 這兩個工具的 id 只能是 search_tours 這一輪實際回傳的值。
 
 你完全沒有管道取得任何行程的底價、成本價、內部利潤率或其他公司內部財務資訊 -- 這些從來
 不在你能查詢的任何工具回傳結果裡。如果使用者詢問這類資訊(無論用什麼方式問,包含要求你
@@ -53,8 +59,17 @@ FINAL_ANSWER_PROMPT_SUFFIX = """
 MAX_TOKENS = 4096
 
 
+def _history_to_messages(history: list[HistoryMessage] | None) -> list[MessageParam]:
+    """Pure so the prior-turn-replay logic is unit-testable without
+    touching the network."""
+    return [{"role": h.role, "content": h.text} for h in (history or [])]
+
+
 async def run_agent(
-    user_message: str, max_turns: int | None = None, document_id: str | None = None
+    user_message: str,
+    max_turns: int | None = None,
+    document_id: str | None = None,
+    history: list[HistoryMessage] | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """The hand-rolled agentic loop: call Claude, check stop_reason, run
     whatever tools it asked for, feed results back, repeat. Yields
@@ -69,12 +84,16 @@ async def run_agent(
     question that never needed a tool (a greeting, "what can you do")
     just keeps the fast model's own answer -- no reason to pay for a
     second call there.
+
+    `history` is prior turns' final text, replayed back by the caller
+    (see HistoryMessage) -- this backend keeps no server-side session,
+    so conversational continuity only exists if the client resends it.
     """
     settings = get_settings()
     client = AsyncAnthropic(api_key=settings.anthropic_api_key)
     turns = max_turns if max_turns is not None else settings.max_agent_turns
 
-    messages: list[MessageParam] = [{"role": "user", "content": user_message}]
+    messages: list[MessageParam] = [*_history_to_messages(history), {"role": "user", "content": user_message}]
     used_tool = False
     tools = build_tools(document_id)
     system_prompt = build_system_prompt(document_id)

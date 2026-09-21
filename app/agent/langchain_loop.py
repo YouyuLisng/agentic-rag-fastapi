@@ -7,6 +7,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
 from app.agent.events import AgentEvent, FinalAnswerEvent, ToolCallEvent, ToolResultEvent
+from app.agent.history import HistoryMessage
 from app.agent.langchain_tools import LANGCHAIN_TOOLS, build_langchain_tools
 from app.agent.loop import FINAL_ANSWER_PROMPT_SUFFIX, MAX_TOKENS, SYSTEM_PROMPT, build_system_prompt
 from app.config import get_settings
@@ -86,8 +87,14 @@ async def _escalate_final_answer(history: list[BaseMessage]) -> str:
     return _extract_text(response)
 
 
+def _history_to_base_messages(history: list[HistoryMessage] | None) -> list[BaseMessage]:
+    """Pure so the prior-turn-replay logic is unit-testable without
+    touching the network."""
+    return [HumanMessage(content=h.text) if h.role == "user" else AIMessage(content=h.text) for h in (history or [])]
+
+
 async def run_agent_langchain(
-    user_message: str, document_id: str | None = None
+    user_message: str, document_id: str | None = None, history: list[HistoryMessage] | None = None
 ) -> AsyncIterator[AgentEvent]:
     """Same tools, same system prompt, same underlying query functions,
     same fast/smart model routing policy as run_agent() in loop.py --
@@ -96,8 +103,12 @@ async def run_agent_langchain(
     instead of a hand-rolled while loop. Streams the same AgentEvent
     union so the frontend needs no changes to support either backend.
 
-    The message history is tracked manually (mirroring what the
-    hand-rolled loop already does) rather than read back from
+    `history` is prior turns' final text, replayed back by the caller
+    (see app.agent.history.HistoryMessage) -- same stateless-backend
+    reasoning as run_agent().
+
+    The accumulated conversation is tracked manually (mirroring what
+    the hand-rolled loop already does) rather than read back from
     LangGraph state, specifically so the escalation call below can
     reuse it outside the graph -- create_agent's compiled graph is
     bound to one fixed model, so switching to the smart model for the
@@ -106,10 +117,13 @@ async def run_agent_langchain(
     agent = _get_agent(document_id)
     turn = -1
     used_tool = False
-    history: list[BaseMessage] = [HumanMessage(content=user_message)]
+    accumulated: list[BaseMessage] = [*_history_to_base_messages(history), HumanMessage(content=user_message)]
+
+    input_messages = [{"role": h.role, "content": h.text} for h in (history or [])]
+    input_messages.append({"role": "user", "content": user_message})
 
     async for event in agent.astream_events(
-        {"messages": [{"role": "user", "content": user_message}]},
+        {"messages": input_messages},
         version="v2",
     ):
         match event["event"]:
@@ -125,7 +139,7 @@ async def run_agent_langchain(
                 )
             case "on_tool_end":
                 tool_message: ToolMessage = event["data"]["output"]
-                history.append(tool_message)
+                accumulated.append(tool_message)
                 yield ToolResultEvent(
                     turn=turn,
                     tool_use_id=str(event["run_id"]),
@@ -137,9 +151,9 @@ async def run_agent_langchain(
                 ai_message: AIMessage = event["data"]["output"]
                 if ai_message.tool_calls:
                     used_tool = True
-                    history.append(ai_message)
+                    accumulated.append(ai_message)
                 elif not used_tool:
                     yield FinalAnswerEvent(model=settings.claude_model_fast, text=_extract_text(ai_message))
                 else:
-                    final_text = await _escalate_final_answer(history)
+                    final_text = await _escalate_final_answer(accumulated)
                     yield FinalAnswerEvent(model=settings.claude_model_smart, text=final_text)
