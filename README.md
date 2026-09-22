@@ -1,5 +1,9 @@
 # Agentic RAG Travel Assistant
 
+For a business-facing writeup of what was tested and what it found --
+not this engineering README -- see
+[`docs/POC_REPORT.md`](docs/POC_REPORT.md).
+
 A multi-step agentic loop (Claude tool use) that routes between
 semantic retrieval (RAG over a small travel-policy knowledge base) and
 structured tool calls (querying a tour catalog), deciding autonomously
