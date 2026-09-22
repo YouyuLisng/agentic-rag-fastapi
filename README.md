@@ -198,6 +198,15 @@ where something else already owns `::1:3000`, host-only `docker ps`
 inspection won't show the conflict, since it's entirely outside
 Docker's own view).
 
+**Images are a snapshot, not a live mount** -- after pulling new code
+or making a change, `docker compose up --build -d` again before
+testing. Left running for hours across several unrelated code changes,
+a container will keep serving the exact code it was built from; a
+request that looks like a regression (a feature silently missing from
+a response) can just as easily be a stale image, not a real bug --
+check `docker images` / when the container was created before
+assuming otherwise.
+
 Each service also has its own standalone `Dockerfile` -- a real
 deployment isn't required to run them together via this compose file;
 backend and frontend could just as reasonably land on two separate
