@@ -77,6 +77,45 @@ inventory system, but that's a data-volume difference, not an
 architectural one -- swapping in a real product database wouldn't
 change this diagram at all, only what's behind `tours`.
 
+### Metadata design (`policy_chunks.tags`) and hand vs. AI tagging
+
+`policy_chunks` has a `tags text[]` column (GIN-indexed), curated by
+hand in `app/scripts/seed.py`'s `POLICY_TAGS` dict -- deliberately
+allowed to overlap across documents (force-majeure is tagged 退款 too,
+since it genuinely discusses refund handling) rather than being a 1:1
+relabeling of `document_slug`. `search_knowledge`/`match_policy_chunks`
+accept an optional `filter_tags` that pre-filters via SQL array overlap
+before vector ranking -- a caller that already knows the topic bucket
+can use it to keep a near-miss out of contention entirely, rather than
+hoping embedding similarity alone ranks it correctly. Demonstrated
+against a real near-miss already in the retrieval eval set: filtering
+to `tags=['不可抗力']` fixes "因為疫情取消行程,費用會退嗎?" from
+ranking `cancellation` first (0.522 similarity, barely ahead of the
+correct `force-majeure` at 0.513) to ranking the right document first
+-- `app/scripts/metadata_filter_demo.py`.
+
+Chunking itself stays rule-based at any realistic document volume --
+most business documents have a stable structure a paragraph splitter
+handles fine. Metadata tagging is the step that doesn't scale by hand
+once document count moves from "8, read once" to "hundreds, arriving
+continuously" -- production systems typically hand this step to an
+LLM. `app/scripts/auto_tag_metadata.py` runs that experiment for real:
+same 8 documents, Haiku generates 2-4 tags per document, compared
+against the hand-curated `POLICY_TAGS`. Exact-string overlap was low
+(1/18 tags matched literally) but mostly because the AI tags were
+*more* granular, not worse (`insurance` → `責任保險`/`行李遺失` instead
+of just `保險`/`理賠`). The one real finding: the AI tagged
+`cancellation.md` with `不可抗力`, even though that document explicitly
+says the rule *doesn't* apply there and points to a separate policy --
+surface keyword co-occurrence, not exclusion-aware reasoning. Applied
+naively as a `filter_tags` replacement, that mistake would have undone
+the exact ranking fix above (cancellation reappearing in a
+force-majeure-filtered search). The practical conclusion, not just an
+assertion: AI tagging at scale needs either a constrained vocabulary
+(the model picks from a fixed list, doesn't generate freely) or a
+human spot-check step, especially wherever tags drive hard filtering
+rather than soft browsing.
+
 ### Data isolation (internal cost price never reaches the model)
 
 `tours.cost_price_twd` (internal floor/cost price, as opposed to
