@@ -127,6 +127,58 @@ uv run python -m app.scripts.chat_cli "退訂政策是什麼?"
 uv run python -m app.scripts.chat_cli_langchain "退訂政策是什麼?"
 ```
 
+## Private deployment (Docker)
+
+The setup above depends on Supabase for Postgres. For an actual private
+deployment -- the thing a customer with a "data can't leave our
+infrastructure" requirement needs -- `docker-compose.yml` runs the
+*entire* stack with no external cloud dependency at all: a self-hosted
+Postgres+pgvector container replaces Supabase (same schema, same
+extension, just not managed by a third party), alongside the FastAPI
+backend and the Next.js frontend.
+
+Requires `agentic-rag-fastapi` and `agentic-rag-frontend` cloned as
+sibling directories (the frontend has no Dockerfile of its own compose
+file -- it's built via `context: ../agentic-rag-frontend` from here),
+and a `.env` in this directory with `ANTHROPIC_API_KEY` /
+`VOYAGE_API_KEY` (real third-party API keys, not something a local
+Postgres container can replace).
+
+```bash
+docker compose up --build -d
+docker compose exec backend python -m app.scripts.seed   # once, after first startup
+```
+
+Backend on `http://localhost:8000`, frontend on `http://localhost:3001`
+(not 3000 -- see the port comment in docker-compose.yml: on a machine
+where something else already owns `::1:3000`, host-only `docker ps`
+inspection won't show the conflict, since it's entirely outside
+Docker's own view).
+
+Each service also has its own standalone `Dockerfile` -- a real
+deployment isn't required to run them together via this compose file;
+backend and frontend could just as reasonably land on two separate
+hosts, each built and run independently:
+
+```bash
+docker build -t agentic-rag-backend .
+docker run -p 8000:8000 --env-file .env agentic-rag-backend
+```
+
+**Verified live, not just "the Dockerfile looks right":** built both
+images, brought up all three containers, seeded the self-hosted
+Postgres, and ran a real chat request end-to-end (`search_knowledge`
+hitting the containerized pgvector, real Claude tool-calling, a
+correctly grounded answer) entirely through the Docker network. Two
+real environment issues surfaced along the way, neither an application
+bug: the container runtime's default DNS couldn't resolve external
+hosts at all (fixed by giving the VM explicit resolvers, `--dns
+8.8.8.8 --dns 1.1.1.1`, not by changing any app code), and separately,
+a stale local process outside Docker entirely was squatting on a host
+port, which made a fully working container look broken from the
+outside until the actual cause (checked with `lsof`, not by staring at
+the Dockerfile) turned out to have nothing to do with Docker.
+
 ## Project layout
 
 ```
@@ -155,6 +207,8 @@ data/
   tours.json        8 seed tours (structured fields + itinerary)
   policies/         8 hand-written policy documents (source for RAG)
 tests/
+Dockerfile          multi-stage uv build -- see "Private deployment" above
+docker-compose.yml  backend + frontend + self-hosted Postgres+pgvector
 ```
 
 ## Testing

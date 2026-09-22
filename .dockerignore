@@ -1,0 +1,13 @@
+.git
+.venv
+__pycache__/
+*.py[oc]
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.env
+.env.local
+.DS_Store
+.vscode/
+.idea/
+README.md
