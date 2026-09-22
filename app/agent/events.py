@@ -23,10 +23,23 @@ class ToolResultEvent(BaseModel):
     is_error: bool
 
 
+class SourceRef(BaseModel):
+    """One retrieved policy chunk that could have grounded the final
+    answer -- attached so the UI can render a citation that jumps
+    straight to the actual source text, not just trust the model's own
+    prose mention of it (e.g. "根據退訂政策...")."""
+
+    document_slug: str
+    title: str
+    content: str
+    similarity: float
+
+
 class FinalAnswerEvent(BaseModel):
     type: Literal["final_answer"] = "final_answer"
     text: str
     model: str  # which model wrote the final answer (model routing)
+    sources: list[SourceRef] = []
 
 
 class RefusalEvent(BaseModel):

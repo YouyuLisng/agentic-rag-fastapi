@@ -6,10 +6,11 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
-from app.agent.events import AgentEvent, FinalAnswerEvent, ToolCallEvent, ToolResultEvent
+from app.agent.events import AgentEvent, FinalAnswerEvent, SourceRef, ToolCallEvent, ToolResultEvent
 from app.agent.history import HistoryMessage
 from app.agent.langchain_tools import LANGCHAIN_TOOLS, build_langchain_tools
 from app.agent.loop import FINAL_ANSWER_PROMPT_SUFFIX, MAX_TOKENS, SYSTEM_PROMPT, build_system_prompt
+from app.agent.sources import extract_sources, merge_sources
 from app.config import get_settings
 
 _agent: Any = None
@@ -117,6 +118,7 @@ async def run_agent_langchain(
     agent = _get_agent(document_id)
     turn = -1
     used_tool = False
+    sources: list[SourceRef] = []
     accumulated: list[BaseMessage] = [*_history_to_base_messages(history), HumanMessage(content=user_message)]
 
     input_messages = [{"role": h.role, "content": h.text} for h in (history or [])]
@@ -140,20 +142,24 @@ async def run_agent_langchain(
             case "on_tool_end":
                 tool_message: ToolMessage = event["data"]["output"]
                 accumulated.append(tool_message)
+                is_error = getattr(tool_message, "status", "success") == "error"
                 yield ToolResultEvent(
                     turn=turn,
                     tool_use_id=str(event["run_id"]),
                     name=event["name"],
                     result=str(tool_message.content),
-                    is_error=getattr(tool_message, "status", "success") == "error",
+                    is_error=is_error,
                 )
+                sources = merge_sources(sources, extract_sources(event["name"], str(tool_message.content), is_error))
             case "on_chat_model_end":
                 ai_message: AIMessage = event["data"]["output"]
                 if ai_message.tool_calls:
                     used_tool = True
                     accumulated.append(ai_message)
                 elif not used_tool:
-                    yield FinalAnswerEvent(model=settings.claude_model_fast, text=_extract_text(ai_message))
+                    yield FinalAnswerEvent(
+                        model=settings.claude_model_fast, text=_extract_text(ai_message), sources=sources
+                    )
                 else:
                     final_text = await _escalate_final_answer(accumulated)
-                    yield FinalAnswerEvent(model=settings.claude_model_smart, text=final_text)
+                    yield FinalAnswerEvent(model=settings.claude_model_smart, text=final_text, sources=sources)

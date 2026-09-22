@@ -9,10 +9,12 @@ from app.agent.events import (
     FinalAnswerEvent,
     MaxTurnsExceededEvent,
     RefusalEvent,
+    SourceRef,
     ToolCallEvent,
     ToolResultEvent,
 )
 from app.agent.history import HistoryMessage
+from app.agent.sources import extract_sources, merge_sources
 from app.agent.tools import build_tools, execute_tool
 from app.config import get_settings
 
@@ -95,6 +97,7 @@ async def run_agent(
 
     messages: list[MessageParam] = [*_history_to_messages(history), {"role": "user", "content": user_message}]
     used_tool = False
+    sources: list[SourceRef] = []
     tools = build_tools(document_id)
     system_prompt = build_system_prompt(document_id)
 
@@ -122,6 +125,7 @@ async def run_agent(
             yield FinalAnswerEvent(
                 model=settings.claude_model_fast,
                 text="回答時超過長度限制,請試著把問題拆得更簡短明確一點。",
+                sources=sources,
             )
             return
 
@@ -131,11 +135,11 @@ async def run_agent(
             # rather than looping forever on an unhandled case.
             if not used_tool:
                 text = "".join(block.text for block in response.content if block.type == "text")
-                yield FinalAnswerEvent(model=settings.claude_model_fast, text=text)
+                yield FinalAnswerEvent(model=settings.claude_model_fast, text=text, sources=sources)
                 return
 
             final_text = await _escalate_final_answer(client, settings.claude_model_smart, messages)
-            yield FinalAnswerEvent(model=settings.claude_model_smart, text=final_text)
+            yield FinalAnswerEvent(model=settings.claude_model_smart, text=final_text, sources=sources)
             return
 
         used_tool = True
@@ -165,6 +169,7 @@ async def run_agent(
             yield ToolResultEvent(
                 turn=turn, tool_use_id=block.id, name=block.name, result=result_json, is_error=is_error
             )
+            sources = merge_sources(sources, extract_sources(block.name, result_json, is_error))
 
             tool_result_blocks.append(
                 ToolResultBlockParam(
