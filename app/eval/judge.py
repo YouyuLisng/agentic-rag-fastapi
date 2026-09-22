@@ -19,6 +19,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from app.llm_json import extract_json
 from app.rag.embeddings import embed_query
 
 # Typed as Any rather than AsyncAnthropic: AsyncMessages.create is
@@ -73,45 +74,6 @@ class RelevancyJudgment(BaseModel):
     noncommittal: bool
 
 
-def _extract_json(text: str) -> str:
-    """Extract the first balanced top-level JSON object from the
-    judge's raw text response. The judge is asked to output *only*
-    JSON, but sometimes wraps it in a ```json fence, or -- surfaced by
-    a real run comparing against Ollama models, whose Faithfulness
-    input (the *answer being judged*, not the judge's own output) can
-    be long/repetitive/unusual enough to nudge the judge into adding
-    trailing prose after the closing brace -- appends explanatory text
-    afterward. Brace-depth counting that's aware of quoted strings (so
-    a brace inside a claim's own text doesn't miscount) finds the
-    actual object regardless of what surrounds it."""
-    start = text.find("{")
-    if start == -1:
-        return text.strip()
-
-    depth = 0
-    in_string = False
-    escape = False
-    for i in range(start, len(text)):
-        ch = text[i]
-        if in_string:
-            if escape:
-                escape = False
-            elif ch == "\\":
-                escape = True
-            elif ch == '"':
-                in_string = False
-            continue
-        if ch == '"':
-            in_string = True
-        elif ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start : i + 1]
-    return text[start:].strip()
-
-
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
     dot = sum(x * y for x, y in zip(a, b, strict=True))
     norm_a = math.sqrt(sum(x * x for x in a))
@@ -131,7 +93,7 @@ async def score_faithfulness(
         messages=[{"role": "user", "content": FAITHFULNESS_PROMPT.format(context=context_text, answer=answer)}],
     )
     raw = "".join(b.text for b in response.content if b.type == "text")
-    judgment = FaithfulnessJudgment.model_validate_json(_extract_json(raw))
+    judgment = FaithfulnessJudgment.model_validate_json(extract_json(raw))
 
     if not judgment.claims:
         # Nothing factual to check (e.g. a pure greeting) is vacuously
@@ -152,7 +114,7 @@ async def score_answer_relevancy(
         messages=[{"role": "user", "content": ANSWER_RELEVANCY_PROMPT.format(answer=answer)}],
     )
     raw = "".join(b.text for b in response.content if b.type == "text")
-    judgment = RelevancyJudgment.model_validate_json(_extract_json(raw))
+    judgment = RelevancyJudgment.model_validate_json(extract_json(raw))
 
     if judgment.noncommittal or not judgment.questions:
         return 0.0, judgment.questions, True
