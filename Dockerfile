@@ -40,4 +40,16 @@ EXPOSE 8000
 # which don't set PORT at all. Calls uvicorn directly (not `uv run
 # uvicorn ...`) -- the venv is already fully built and on PATH, so
 # there's nothing left for uv to resolve or sync at container start.
-CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+#
+# --proxy-headers --forwarded-allow-ips='*' -- behind Render's (or any
+# PaaS's) reverse proxy, the raw TCP peer uvicorn sees is the proxy
+# itself, not the real client, so request.client.host is the same
+# internal address for every request (or an inconsistent one, if the
+# proxy load-balances across nodes) -- either way, slowapi's per-IP
+# rate limiting keys off that value and silently never accumulates
+# past 1. This tells uvicorn to trust X-Forwarded-For and rewrite
+# request.client from it instead. Trusting '*' is safe specifically
+# because the container has no public listener of its own -- Render
+# only reaches it through the proxy, so there's no path for an
+# external caller to spoof the header directly.
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*'
