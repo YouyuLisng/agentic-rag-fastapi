@@ -10,6 +10,16 @@ class Settings(BaseSettings):
     voyage_api_key: str
     database_url: str
 
+    # Comma-separated -- the frontend's real deployed origin gets added
+    # here via an env var once it has one, rather than hardcoded, since
+    # this backend doesn't know in advance what platform/URL the
+    # frontend ends up on. Defaults cover local dev only.
+    cors_origins: str = "http://localhost:3000,http://localhost:3001"
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
     # Model routing: every per-turn tool-selection decision uses the fast
     # model; the final answer is escalated to the smart model only when
     # tools were actually used (a trivial no-tool answer stays on the

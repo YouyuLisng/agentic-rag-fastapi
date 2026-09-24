@@ -8,6 +8,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from starlette.types import ExceptionHandler
 
+from app.config import get_settings
 from app.db import close_pool, get_pool, init_pool
 from app.rate_limit import limiter
 from app.routers.chat import router as chat_router
@@ -31,11 +32,12 @@ app.state.limiter = limiter
 # issue (the runtime signature is compatible), so cast rather than wrap.
 app.add_exception_handler(RateLimitExceeded, cast(ExceptionHandler, _rate_limit_exceeded_handler))
 
-# The frontend (Next.js) runs as a separate origin during local dev;
-# tighten this to the deployed frontend's real origin before shipping.
+# The frontend runs as a separate origin -- CORS_ORIGINS (comma-
+# separated) controls what's allowed, so the deployed frontend's real
+# origin can be added via an env var without a code change/redeploy.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_origins=get_settings().cors_origins_list,
     allow_methods=["*"],
     allow_headers=["*"],
 )

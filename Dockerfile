@@ -33,7 +33,11 @@ USER appuser
 
 EXPOSE 8000
 
-# Calls uvicorn directly (not `uv run uvicorn ...`) -- the venv is
-# already fully built and on PATH, so there's nothing left for uv to
-# resolve or sync at container start.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Shell form (not exec form) so $PORT actually expands -- platforms
+# like Render assign a dynamic port via this env var and route traffic
+# to whatever the service actually listens on, ignoring EXPOSE/any
+# hardcoded port. Defaults to 8000 for docker-compose/local runs,
+# which don't set PORT at all. Calls uvicorn directly (not `uv run
+# uvicorn ...`) -- the venv is already fully built and on PATH, so
+# there's nothing left for uv to resolve or sync at container start.
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}

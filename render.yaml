@@ -1,0 +1,26 @@
+# Render Blueprint -- https://render.com/docs/blueprint-spec
+# Lets Render read this repo and propose the service config
+# automatically ("New +" -> "Blueprint" -> point at this repo) instead
+# of clicking through every field by hand. Secrets are `sync: false` --
+# Render prompts for those in the dashboard rather than expecting them
+# committed here.
+services:
+  - type: web
+    name: agentic-rag-backend
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: VOYAGE_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      # The deployed frontend's real origin, once it has one --
+      # comma-separated if there's more than one (e.g. a Vercel
+      # preview URL alongside the production domain).
+      - key: CORS_ORIGINS
+        sync: false
