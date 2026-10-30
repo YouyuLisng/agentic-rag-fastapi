@@ -28,11 +28,15 @@ class EvalReport(BaseModel):
     cases: list[EvalCaseResult]
 
 
-async def run_retrieval_eval(k: int = DEFAULT_K) -> EvalReport:
+async def run_retrieval_eval(k: int = DEFAULT_K, rerank: bool | None = None) -> EvalReport:
+    """`rerank` is forwarded to search_knowledge: None uses the settings
+    default, True/False forces the two-stage rerank on/off -- so a caller
+    can score the same queries both ways to measure what reranking buys
+    (see app/scripts/rerank_eval_compare.py)."""
     cases: list[EvalCaseResult] = []
 
     for case in EVAL_CASES:
-        hits = await search_knowledge(case["query"], match_count=k)
+        hits = await search_knowledge(case["query"], match_count=k, rerank=rerank)
         retrieved_slugs = [hit["document_slug"] for hit in hits]
 
         rank = None

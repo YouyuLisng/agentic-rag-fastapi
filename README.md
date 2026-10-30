@@ -16,7 +16,8 @@ being a strawman for the other.
 
 ## Stack
 
-FastAPI, Claude (Anthropic API), Voyage embeddings, Postgres + pgvector
+FastAPI, Claude (Anthropic API), Voyage embeddings + reranker (two-stage
+retrieval), Postgres + pgvector
 (Supabase), Next.js frontend (separate project) consuming this API over
 SSE for streamed decision visualization. Both implementations sit
 behind the same `POST /chat` endpoint, selected per-request via an
@@ -80,6 +81,32 @@ or a snapshot from ingestion time. The table happens to be seeded from
 inventory system, but that's a data-volume difference, not an
 architectural one -- swapping in a real product database wouldn't
 change this diagram at all, only what's behind `tours`.
+
+### Two-stage retrieval (vector → rerank)
+
+`search_knowledge` retrieves a wide candidate set by vector similarity
+(`rerank_candidate_count`, default 20), then reranks it down to the
+caller's `match_count` with a Voyage cross-encoder
+(`app/rag/rerank.py`). A cross-encoder reads query and document
+*together*, so it separates near-duplicate distractors that pure
+embedding cosine ranks almost tied -- the exact failure mode behind the
+eval set's one real miss (`因為疫情取消行程,費用會退嗎?`, where
+`force-majeure` sits at 0.513 vs `cancellation` at 0.522 on pure
+vector). The metadata pre-filter above fixes that case by requiring the
+caller to know the topic bucket in advance; reranking fixes it without
+that, by actually reading the candidates. Toggleable
+(`rerank_enabled`), and the retrieval eval can score the same queries
+both ways in one run -- `app/scripts/rerank_eval_compare.py`.
+
+**Stated honestly: on this 8-document knowledge base the first stage
+already ceilings** (accuracy@5 = 100%, MRR ~0.97), so reranking barely
+moves the *aggregate* -- there is almost no headroom left to win back.
+Its payoff is at scale, where the candidate set is wide and first-stage
+ranking mistakes are common; the two-stage pipeline is built and
+measured here so that scale story isn't vapor, and the force-majeure
+near-miss is the one concrete case where it earns its keep even at this
+size. A fabricated "+X% from reranking" on 8 documents would be exactly
+that -- fabricated.
 
 ### Metadata design (`policy_chunks.tags`) and hand vs. AI tagging
 

@@ -29,6 +29,22 @@ class Settings(BaseSettings):
     voyage_embedding_model: str = "voyage-3"
     voyage_embedding_dimensions: int = 1024
 
+    # Two-stage retrieval: the vector search pulls a wide candidate set
+    # (rerank_candidate_count), then a Voyage cross-encoder reranks it
+    # down to the caller's match_count. A cross-encoder reads
+    # query+document together, so it separates near-duplicate distractors
+    # that pure embedding cosine ranks almost tied -- the exact failure
+    # mode behind the eval set's one real miss (疫情取消 -> force-majeure
+    # vs cancellation). On this 8-document knowledge base the first stage
+    # already ceilings (accuracy@5 = 100%), so rerank barely moves the
+    # aggregate -- its payoff is at scale, where the candidate set is
+    # wide and first-stage ranking mistakes are common. Toggleable so the
+    # eval can measure with/without, and so it can be turned off to save
+    # the extra API call where the headroom isn't worth it.
+    rerank_enabled: bool = True
+    voyage_rerank_model: str = "rerank-2.5-lite"
+    rerank_candidate_count: int = 20
+
     max_agent_turns: int = 6
 
     # Rate limiting: every /chat and /documents request costs real Anthropic/
