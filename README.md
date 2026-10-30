@@ -82,6 +82,16 @@ inventory system, but that's a data-volume difference, not an
 architectural one -- swapping in a real product database wouldn't
 change this diagram at all, only what's behind `tours`.
 
+`search_tours` is built for that larger catalog: it caps returned rows
+(`tour_search_limit`, default 10) and reports the true match `total`
+alongside them, so when a broad filter matches far more than fit, the
+agent tells the user to narrow their filters instead of being handed --
+and having to reason over -- an unbounded wall of rows (context bloat,
+cost, the model picking arbitrarily). With 8 seed tours this never bites;
+`app/scripts/seed_bulk_tours.py` inserts a batch of clearly-marked
+synthetic tours (`--count 90`, removable with `--clear`) so the
+many-match behavior can actually be exercised at scale.
+
 ### Two-stage retrieval (vector → rerank)
 
 `search_knowledge` retrieves a wide candidate set by vector similarity

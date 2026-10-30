@@ -45,6 +45,16 @@ class Settings(BaseSettings):
     voyage_rerank_model: str = "rerank-2.5-lite"
     rerank_candidate_count: int = 20
 
+    # search_tours caps how many matching rows it returns, and reports the
+    # true total alongside them. With 8 seed tours this never bites, but a
+    # broad filter against a real catalog ("Asia tours") can match
+    # hundreds -- returning them all floods the agent's context (cost,
+    # truncation, the model picking arbitrarily from a wall of rows). The
+    # cap keeps the result bounded and lets the agent tell the user to
+    # narrow their filters when total > returned, instead of silently
+    # dumping everything.
+    tour_search_limit: int = 10
+
     max_agent_turns: int = 6
 
     # Rate limiting: every /chat and /documents request costs real Anthropic/

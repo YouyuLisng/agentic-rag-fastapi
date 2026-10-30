@@ -42,13 +42,17 @@ async def search_tours(
     suitable_for: str | None = None,
 ) -> str:
     """Structured filter search over the tour catalog by country,
-    budget, trip length, and/or traveler type. Returns a list of
-    matching tours (id, title, country, location, days, budget,
-    suitable_for, summary) -- NOT the full day-by-day itinerary, use
-    get_tour_detail with a returned id for that. All filters are
-    optional and combine with AND; omit filters the user didn't
-    specify rather than guessing a value. Use this for 'find a tour
-    matching X' questions, not for policy/rule questions.
+    budget, trip length, and/or traveler type. Returns
+    {total, returned, limit, tours}: `tours` holds the matching tours
+    (id, title, country, location, days, budget, suitable_for, summary)
+    -- NOT the full day-by-day itinerary, use get_tour_detail with a
+    returned id for that. `total` is the true number of matches; when
+    total > returned there are more than shown, so tell the user and
+    suggest narrowing their filters (budget, country, days) rather than
+    implying these are all of them. All filters are optional and combine
+    with AND; omit filters the user didn't specify rather than guessing a
+    value. Use this for 'find a tour matching X' questions, not for
+    policy/rule questions.
 
     Args:
         country: Filter by destination country. Must be exactly one
