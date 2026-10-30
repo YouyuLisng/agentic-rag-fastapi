@@ -108,32 +108,56 @@ that, by actually reading the candidates. Toggleable
 (`rerank_enabled`), and the retrieval eval can score the same queries
 both ways in one run -- `app/scripts/rerank_eval_compare.py`.
 
-**Stated honestly: on this 8-document knowledge base the first stage
-already ceilings** (accuracy@5 = 100%, MRR ~0.97), so reranking barely
-moves the *aggregate* -- there is almost no headroom left to win back.
-Its payoff is at scale, where the candidate set is wide and first-stage
-ranking mistakes are common; the two-stage pipeline is built and
-measured here so that scale story isn't vapor, and the force-majeure
-near-miss is the one concrete case where it earns its keep even at this
-size. A fabricated "+X% from reranking" on 8 documents would be exactly
-that -- fabricated.
+**Measured on the real eval set (`rerank_eval_compare.py`, same 16
+queries scored both ways in one run):**
 
-Where reranking *can* be measured honestly is a larger corpus with real
-distractors, so there's a dedicated synthetic scale benchmark:
+| | rerank off | rerank on |
+|---|---|---|
+| Accuracy@1 | 0.938 | **1.000** |
+| MRR | 0.969 | **1.000** |
+
+Exactly one case moved: the force-majeure near-miss, rank 2 → 1. That is
+the honest extent of it on 8 documents -- reranking fixes the single
+genuine semantic near-miss and touches nothing else (accuracy@3/@5 were
+already 100% and stayed there). On a 16-case set that one fix reads as
++6.2% @1, but it is one case, not a broad "+6% from reranking" -- the
+headroom was a single confusable pair all along.
+
+Where reranking does *not* help is just as informative, and measured too:
+a 160-document synthetic benchmark of near-duplicate docs (below) showed
+**zero** change from reranking. The distinction the two results draw
+together: a cross-encoder earns its keep on genuine *semantic* confusion
+(force-majeure vs cancellation, where both discuss refunds and the query
+names neither), not on mere near-duplication where the discriminating
+term is already in the query for the embedding model to latch onto.
+
+To probe reranking at scale there's a dedicated synthetic benchmark:
 `app/eval/synthetic_corpus.py` deterministically generates ~160 docs
 across 8 "families" -- each family is one policy template instantiated
 over ~20 entities (product types, scenarios, countries), so every doc in
 a family reads nearly identically to an embedding model and differs only
-by one discriminating entity. That's the exact condition where a
-cross-encoder earns its keep and pure vector similarity doesn't. It lives
-in its own table (`synthetic_policy_chunks`), never mixed into the real
-knowledge base, is clearly labelled synthetic, and is generated without
-an LLM (deterministic, reproducible, free). Seed it with
+by one discriminating entity. It lives in its own table
+(`synthetic_policy_chunks`), never mixed into the real knowledge base, is
+clearly labelled synthetic, and is generated without an LLM
+(deterministic, reproducible, free). Seed it with
 `app/scripts/seed_synthetic.py`, then measure rerank off vs on with
-`app/scripts/synthetic_rerank_benchmark.py` -- the meaningful figure
-there is the *delta* (what rerank recovers once the first stage is
-genuinely challenged), not the absolute numbers, which describe the
-synthetic benchmark rather than the product.
+`app/scripts/synthetic_rerank_benchmark.py`.
+
+**Measured result (40 queries, 160 docs): reranking changed nothing --
+accuracy@1/@3/@5 and MRR were all 1.000 with reranking both off and on,
+in every one of the 8 clusters.** This falsified the hypothesis that near-
+duplicate documents are enough to give a reranker headroom. The reason is
+visible in a single probe: when the query names the discriminating entity
+verbatim (`「國內團」出發前 10 天取消...` → the `國內團` refund doc),
+voyage-3 already ranks the right doc first by a clear margin (0.73 vs the
+next sibling's 0.68), so there is nothing left for the cross-encoder to
+fix. The honest takeaway: a reranker earns its keep under *lexical
+mismatch* -- when a query is semantically about the right doc but shares
+fewer surface terms with it than with a distractor (paraphrase, synonym,
+or the discriminator buried in long text) -- not from near-duplication
+alone. This benchmark doesn't manufacture that condition, so it reports a
+genuine null result rather than a tuned-until-it-wins number; building the
+harder lexical-mismatch variant is the natural next step.
 
 ### Metadata design (`policy_chunks.tags`) and hand vs. AI tagging
 
