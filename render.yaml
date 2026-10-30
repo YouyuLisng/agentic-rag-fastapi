@@ -24,3 +24,11 @@ services:
       # preview URL alongside the production domain).
       - key: CORS_ORIGINS
         sync: false
+      # Optional -- LLM tracing (Langfuse). Omit these in the Render
+      # dashboard and the app runs the same, just untraced.
+      - key: LANGFUSE_PUBLIC_KEY
+        sync: false
+      - key: LANGFUSE_SECRET_KEY
+        sync: false
+      - key: LANGFUSE_HOST
+        sync: false

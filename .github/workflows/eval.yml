@@ -1,0 +1,112 @@
+name: Eval
+
+# Separate from ci.yml on purpose: unit tests (ci.yml) are free and
+# fully mocked, so they gate every push/PR with no cost or flakiness
+# risk. These jobs hit real Voyage/Claude APIs against a real
+# pgvector DB -- retrieval is cheap/deterministic enough to gate
+# push/PR on too, but generation + tool-selection cost a full live
+# agent turn (or several) per case and carry real judge-score
+# variance, so they stay manual/scheduled and report-only (see
+# app/scripts/ci_full_eval_report.py's docstring) rather than
+# blocking every commit, matching this repo's own README on why
+# those two aren't run on every page load either.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+  schedule:
+    # Mondays 03:00 UTC -- catches a silent regression (e.g. a
+    # prompt/model change nobody re-ran the expensive evals for)
+    # within a week, without paying for it on every commit.
+    - cron: "0 3 * * 1"
+
+env:
+  LANGFUSE_TRACING_ENABLED: "false"
+
+jobs:
+  retrieval-eval:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: agentic_rag_eval
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # Never calls Anthropic on this path (pure embedding + pgvector
+      # similarity) -- dummy value only because pydantic-settings
+      # requires the field present at import, same as ci.yml.
+      ANTHROPIC_API_KEY: dummy-for-ci
+      VOYAGE_API_KEY: ${{ secrets.VOYAGE_API_KEY }}
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/agentic_rag_eval
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Apply schema
+        run: psql "$DATABASE_URL" -f db/schema.sql
+
+      - name: Seed (real Voyage embedding calls)
+        run: uv run python -m app.scripts.seed
+
+      - name: Run retrieval eval gate
+        run: uv run python -m app.scripts.ci_retrieval_eval
+
+  full-eval:
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: agentic_rag_eval
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      VOYAGE_API_KEY: ${{ secrets.VOYAGE_API_KEY }}
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/agentic_rag_eval
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Apply schema
+        run: psql "$DATABASE_URL" -f db/schema.sql
+
+      - name: Seed (real Voyage embedding calls)
+        run: uv run python -m app.scripts.seed
+
+      - name: Run generation + tool-selection eval report
+        run: uv run python -m app.scripts.ci_full_eval_report

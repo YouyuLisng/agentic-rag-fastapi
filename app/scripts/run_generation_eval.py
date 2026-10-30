@@ -2,7 +2,7 @@
 Relevancy) against the real agent loop, Claude judge, and Voyage
 embeddings, then prints a report.
 
-Costs real money -- each of the 8 cases runs a full agent turn plus two
+Costs real money -- each of the 24 cases runs a full agent turn plus two
 judge calls. Run: `uv run python -m app.scripts.run_generation_eval`
 """
 
@@ -34,7 +34,7 @@ async def main() -> None:
     m = report.metrics
     print(f"樣本數: {m.n}")
     print(f"平均 Faithfulness: {m.avg_faithfulness:.3f}")
-    print(f"平均 Answer Relevancy: {m.avg_answer_relevancy:.3f}")
+    print(f"平均 Answer Relevancy: {m.avg_answer_relevancy:.3f}(不相關基準線: {m.avg_answer_relevancy_baseline:.3f})")
 
 
 if __name__ == "__main__":

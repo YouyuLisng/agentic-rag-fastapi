@@ -15,6 +15,10 @@ env:
   ANTHROPIC_API_KEY: dummy-for-ci
   VOYAGE_API_KEY: dummy-for-ci
   DATABASE_URL: postgresql://dummy:dummy@localhost:5432/dummy
+  # No Langfuse keys in CI -- explicitly disable rather than rely on
+  # the client's no-key no-op, so a future SDK change can't turn this
+  # into real network calls during the test run.
+  LANGFUSE_TRACING_ENABLED: "false"
 
 jobs:
   test:

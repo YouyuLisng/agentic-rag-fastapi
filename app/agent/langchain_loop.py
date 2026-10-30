@@ -5,6 +5,7 @@ from langchain.agents import create_agent
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
+from langfuse.langchain import CallbackHandler
 
 from app.agent.events import AgentEvent, FinalAnswerEvent, SourceRef, ToolCallEvent, ToolResultEvent
 from app.agent.history import HistoryMessage
@@ -77,13 +78,13 @@ def _extract_text(message: AIMessage) -> str:
     )
 
 
-async def _escalate_final_answer(history: list[BaseMessage]) -> str:
+async def _escalate_final_answer(history: list[BaseMessage], langfuse_handler: CallbackHandler) -> str:
     """Mirrors loop.py's _escalate_final_answer: one call to the smart
     model, no tools bound, given the accumulated history -- its only
     job is to synthesize a final answer from tool results already
     gathered by the fast model."""
     messages: list[BaseMessage] = [SystemMessage(content=SYSTEM_PROMPT + FINAL_ANSWER_PROMPT_SUFFIX), *history]
-    response = await _get_smart_model().ainvoke(messages)
+    response = await _get_smart_model().ainvoke(messages, config={"callbacks": [langfuse_handler]})
     assert isinstance(response, AIMessage)
     return _extract_text(response)
 
@@ -116,6 +117,7 @@ async def run_agent_langchain(
     final answer means stepping outside it for that one call."""
     settings = get_settings()
     agent = _get_agent(document_id)
+    langfuse_handler = CallbackHandler()
     turn = -1
     used_tool = False
     sources: list[SourceRef] = []
@@ -127,6 +129,7 @@ async def run_agent_langchain(
     async for event in agent.astream_events(
         {"messages": input_messages},
         version="v2",
+        config={"callbacks": [langfuse_handler]},
     ):
         match event["event"]:
             case "on_chat_model_start":
@@ -161,5 +164,5 @@ async def run_agent_langchain(
                         model=settings.claude_model_fast, text=_extract_text(ai_message), sources=sources
                     )
                 else:
-                    final_text = await _escalate_final_answer(accumulated)
+                    final_text = await _escalate_final_answer(accumulated, langfuse_handler)
                     yield FinalAnswerEvent(model=settings.claude_model_smart, text=final_text, sources=sources)

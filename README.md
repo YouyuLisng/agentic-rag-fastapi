@@ -20,7 +20,7 @@ FastAPI, Claude (Anthropic API), Voyage embeddings, Postgres + pgvector
 (Supabase), Next.js frontend (separate project) consuming this API over
 SSE for streamed decision visualization. Both implementations sit
 behind the same `POST /chat` endpoint, selected per-request via an
-`impl` field.
+`impl` field. LLM tracing via Langfuse (optional, see below).
 
 ## Architecture
 
@@ -231,6 +231,30 @@ port, which made a fully working container look broken from the
 outside until the actual cause (checked with `lsof`, not by staring at
 the Dockerfile) turned out to have nothing to do with Docker.
 
+## Observability (Langfuse)
+
+Both agent implementations emit LLM traces to [Langfuse](https://langfuse.com)
+when `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY` are set (see
+`.env.example`) -- one trace per `/chat` request, regardless of `impl`:
+
+- **Hand-rolled loop** (`app/agent/loop.py`): each `client.messages.create`
+  call (per-turn tool routing, plus the smart-model final-answer
+  escalation) is wrapped in a manual `start_as_current_observation(...)`
+  generation span, logging the model, input messages, output blocks, and
+  token usage.
+- **LangChain loop** (`app/agent/langchain_loop.py`): a single
+  `langfuse.langchain.CallbackHandler` passed into `astream_events`
+  auto-traces the graph's model/tool calls, same as above.
+
+Both nest under one parent span opened in `app/routers/chat.py`'s SSE
+handler, so a single request -- fast-model routing, tool calls, smart-model
+escalation -- shows up as one trace with the final answer as its output,
+not a pile of disconnected generations.
+
+Unset the keys (or set `LANGFUSE_TRACING_ENABLED=false`, as CI does) and
+the client runs in a no-op disabled mode -- no crash, no network calls,
+just untraced. Nothing else about request handling changes either way.
+
 ## Project layout
 
 ```
@@ -281,7 +305,7 @@ three layers that each catch a different failure mode:
 | Layer | Endpoint / script | What it catches | Live result |
 |---|---|---|---|
 | **Retrieval** | `GET /eval/retrieval`, `app/scripts/run_eval.py` | Wrong document ranked first even though the right one exists | Accuracy@1 93.8%, @3/@5 100%, MRR 0.969 (16 cases) |
-| **Generation** | `GET /eval/generation`, `app/scripts/run_generation_eval.py` | Hallucination (Faithfulness) and answering the wrong question (Answer Relevancy) -- Ragas-style LLM-as-a-Judge, Haiku as judge | Faithfulness 1.00, Answer Relevancy 0.47-0.78 (8 cases) |
+| **Generation** | `GET /eval/generation`, `app/scripts/run_generation_eval.py` | Hallucination (Faithfulness) and answering the wrong question (Answer Relevancy) -- Ragas-style LLM-as-a-Judge, Haiku as judge | Faithfulness 0.996, Answer Relevancy 0.629 vs. 0.291 mismatched-pair baseline (24 cases) |
 | **Tool selection** | `GET /eval/tool-selection`, dataset in `app/eval/tool_selection_dataset.py` | Routing mistakes: wrong tool, missing tool, or an unnecessary tool call the first two layers can't see | Exact-match 19/19, precision/recall 1.0 (19 cases) |
 
 Plus two live regression suites that target specific failure modes by name rather than a general score:

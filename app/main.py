@@ -4,6 +4,7 @@ from typing import cast
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from langfuse import get_client
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from starlette.types import ExceptionHandler
@@ -22,6 +23,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await init_pool()
     yield
     await close_pool()
+    # Langfuse batches spans in a background thread -- flush on shutdown
+    # so the last request's trace isn't lost when the process exits.
+    get_client().flush()
 
 
 app = FastAPI(title="Agentic RAG Travel Assistant", lifespan=lifespan)

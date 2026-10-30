@@ -74,7 +74,7 @@ class RelevancyJudgment(BaseModel):
     noncommittal: bool
 
 
-def _cosine_similarity(a: list[float], b: list[float]) -> float:
+def cosine_similarity(a: list[float], b: list[float]) -> float:
     dot = sum(x * y for x, y in zip(a, b, strict=True))
     norm_a = math.sqrt(sum(x * x for x in a))
     norm_b = math.sqrt(sum(y * y for y in b))
@@ -123,5 +123,5 @@ async def score_answer_relevancy(
         embed_query(original_query),
         asyncio.gather(*(embed_query(q) for q in judgment.questions)),
     )
-    similarities = [_cosine_similarity(original_embedding, emb) for emb in generated_embeddings]
+    similarities = [cosine_similarity(original_embedding, emb) for emb in generated_embeddings]
     return sum(similarities) / len(similarities), judgment.questions, False

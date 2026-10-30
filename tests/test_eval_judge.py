@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.eval import judge as judge_module
-from app.eval.judge import _cosine_similarity, score_answer_relevancy, score_faithfulness
+from app.eval.judge import cosine_similarity, score_answer_relevancy, score_faithfulness
 
 
 class FakeMessages:
@@ -21,15 +21,15 @@ class FakeClient:
 
 
 def test_cosine_similarity_identical_vectors_is_one():
-    assert _cosine_similarity([1.0, 0.0], [1.0, 0.0]) == pytest.approx(1.0)
+    assert cosine_similarity([1.0, 0.0], [1.0, 0.0]) == pytest.approx(1.0)
 
 
 def test_cosine_similarity_orthogonal_vectors_is_zero():
-    assert _cosine_similarity([1.0, 0.0], [0.0, 1.0]) == pytest.approx(0.0)
+    assert cosine_similarity([1.0, 0.0], [0.0, 1.0]) == pytest.approx(0.0)
 
 
 def test_cosine_similarity_zero_vector_is_zero_not_nan():
-    assert _cosine_similarity([0.0, 0.0], [1.0, 0.0]) == 0.0
+    assert cosine_similarity([0.0, 0.0], [1.0, 0.0]) == 0.0
 
 
 async def test_score_faithfulness_all_claims_supported():

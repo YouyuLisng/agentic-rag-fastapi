@@ -3,6 +3,7 @@ from typing import Any, cast
 
 from anthropic import AsyncAnthropic
 from anthropic.types import MessageParam, ToolResultBlockParam
+from langfuse import get_client
 
 from app.agent.events import (
     AgentEvent,
@@ -93,6 +94,7 @@ async def run_agent(
     """
     settings = get_settings()
     client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+    langfuse = get_client()
     turns = max_turns if max_turns is not None else settings.max_agent_turns
 
     messages: list[MessageParam] = [*_history_to_messages(history), {"role": "user", "content": user_message}]
@@ -102,13 +104,26 @@ async def run_agent(
     system_prompt = build_system_prompt(document_id)
 
     for turn in range(turns):
-        response = await client.messages.create(
+        with langfuse.start_as_current_observation(
+            as_type="generation",
+            name=f"tool-routing-turn-{turn}",
             model=settings.claude_model_fast,
-            max_tokens=MAX_TOKENS,
-            system=system_prompt,
-            tools=tools,
-            messages=messages,
-        )
+            input=messages,
+        ) as generation:
+            response = await client.messages.create(
+                model=settings.claude_model_fast,
+                max_tokens=MAX_TOKENS,
+                system=system_prompt,
+                tools=tools,
+                messages=messages,
+            )
+            generation.update(
+                output=[block.model_dump() for block in response.content],
+                usage_details={
+                    "input": response.usage.input_tokens,
+                    "output": response.usage.output_tokens,
+                },
+            )
 
         if response.stop_reason == "refusal":
             details = response.stop_details
@@ -193,10 +208,25 @@ async def _escalate_final_answer(
     """One extra call with no tools available -- its only job is to
     write the final synthesis from the tool results already gathered,
     not to decide anything further."""
-    response = await client.messages.create(
+    langfuse = get_client()
+    with langfuse.start_as_current_observation(
+        as_type="generation",
+        name="final-answer-escalation",
         model=smart_model,
-        max_tokens=MAX_TOKENS,
-        system=SYSTEM_PROMPT + FINAL_ANSWER_PROMPT_SUFFIX,
-        messages=messages,
-    )
-    return "".join(block.text for block in response.content if block.type == "text")
+        input=messages,
+    ) as generation:
+        response = await client.messages.create(
+            model=smart_model,
+            max_tokens=MAX_TOKENS,
+            system=SYSTEM_PROMPT + FINAL_ANSWER_PROMPT_SUFFIX,
+            messages=messages,
+        )
+        text = "".join(block.text for block in response.content if block.type == "text")
+        generation.update(
+            output=text,
+            usage_details={
+                "input": response.usage.input_tokens,
+                "output": response.usage.output_tokens,
+            },
+        )
+        return text
