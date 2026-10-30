@@ -118,6 +118,23 @@ near-miss is the one concrete case where it earns its keep even at this
 size. A fabricated "+X% from reranking" on 8 documents would be exactly
 that -- fabricated.
 
+Where reranking *can* be measured honestly is a larger corpus with real
+distractors, so there's a dedicated synthetic scale benchmark:
+`app/eval/synthetic_corpus.py` deterministically generates ~160 docs
+across 8 "families" -- each family is one policy template instantiated
+over ~20 entities (product types, scenarios, countries), so every doc in
+a family reads nearly identically to an embedding model and differs only
+by one discriminating entity. That's the exact condition where a
+cross-encoder earns its keep and pure vector similarity doesn't. It lives
+in its own table (`synthetic_policy_chunks`), never mixed into the real
+knowledge base, is clearly labelled synthetic, and is generated without
+an LLM (deterministic, reproducible, free). Seed it with
+`app/scripts/seed_synthetic.py`, then measure rerank off vs on with
+`app/scripts/synthetic_rerank_benchmark.py` -- the meaningful figure
+there is the *delta* (what rerank recovers once the first stage is
+genuinely challenged), not the absolute numbers, which describe the
+synthetic benchmark rather than the product.
+
 ### Metadata design (`policy_chunks.tags`) and hand vs. AI tagging
 
 `policy_chunks` has a `tags text[]` column (GIN-indexed), curated by

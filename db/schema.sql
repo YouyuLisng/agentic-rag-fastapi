@@ -88,6 +88,48 @@ as $$
     limit match_count;
 $$;
 
+-- Synthetic scale benchmark (app/scripts/seed_synthetic.py). A separate
+-- table, deliberately NOT policy_chunks: this is generated stress-test
+-- data for measuring two-stage retrieval (vector -> rerank) at a volume
+-- the 8 hand-written policy docs can't reach -- it must never mix into
+-- the real knowledge base search_knowledge serves. Same vector(1024)
+-- shape and cosine index as policy_chunks so the retrieval behavior
+-- being measured is the real one.
+create table if not exists synthetic_policy_chunks (
+    id uuid primary key default gen_random_uuid(),
+    document_slug text not null,
+    cluster text not null,
+    title text not null,
+    content text not null,
+    embedding vector(1024),
+    created_at timestamptz not null default now()
+);
+
+create index if not exists synthetic_policy_chunks_embedding_idx
+    on synthetic_policy_chunks using hnsw (embedding vector_cosine_ops);
+
+create or replace function match_synthetic_policy_chunks(
+    query_embedding vector(1024),
+    match_count int default 5
+)
+returns table (
+    id uuid,
+    document_slug text,
+    cluster text,
+    title text,
+    content text,
+    similarity float
+)
+language sql stable
+as $$
+    select
+        id, document_slug, cluster, title, content,
+        1 - (embedding <=> query_embedding) as similarity
+    from synthetic_policy_chunks
+    order by embedding <=> query_embedding
+    limit match_count;
+$$;
+
 -- Mode B: per-upload document chunks. document_id scopes retrieval to
 -- one specific upload -- never mixed with the policy knowledge base or
 -- another upload, since there's no auth/session model beyond that id.
